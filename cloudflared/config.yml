@@ -1,0 +1,39 @@
+# Cloudflare Tunnel config for MirrorSelf.
+#
+# Two ways to use this:
+#
+# 1) QUICK START — `cloudflared` Docker sidecar (recommended for `docker compose`).
+#    - Create a tunnel in the Cloudflare Zero Trust dashboard.
+#    - Copy the tunnel token into `TUNNEL_TOKEN` in your `.env`.
+#    - Run: `docker compose --profile tunnel up -d`
+#    - In the dashboard, route `mirrorself.example.com` -> this tunnel.
+#    - Route `api.example.com` -> the same tunnel, and the ingress
+#      below will send `/api` to the backend.
+#
+# 2) STANDALONE — install `cloudflared` on the host and run with this file:
+#    `cloudflared tunnel --config cloudflared/config.yml run`
+#    (you'll need to log in once: `cloudflared tunnel login`).
+#
+# The `ingress` rules below are the source of truth. The Docker sidecar reads
+# them from the same file via `tunnel run` (you'll need to mount this file
+# and adjust the command).
+
+tunnel: mirrorself
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  # Frontend (root)
+  - hostname: mirrorself.example.com
+    service: http://frontend:3000
+  # Backend API
+  - hostname: api.example.com
+    service: http://backend:8000
+    originRequest:
+      noTLSVerify: false
+      connectTimeout: 10s
+      tlsTimeout: 10s
+  # Health probe
+  - hostname: health.example.com
+    service: http://backend:8000/health
+  # Catch-all 404 — required by cloudflared
+  - service: http_status:404

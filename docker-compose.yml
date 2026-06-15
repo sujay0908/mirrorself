@@ -1,0 +1,108 @@
+# MirrorSelf full-stack dev + prod compose.
+#
+# - postgres: persistent data
+# - redis: short-term memory + cache
+# - backend: FastAPI + (optional) GPU for XTTS/SadTalker
+# - frontend: Next.js standalone build, proxies /api -> backend
+# - cloudflared: optional, only if you want public DNS exposure
+#
+# Run: `docker compose up --build`
+# Stop: `docker compose down`
+#
+# Volumes persist data + uploaded media between restarts.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mirrorself
+      POSTGRES_PASSWORD: mirrorself
+      POSTGRES_DB: mirrorself
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mirrorself"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      APP_ENV: production
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production-please}
+      DATABASE_URL: postgresql+asyncpg://mirrorself:mirrorself@postgres:5432/mirrorself
+      REDIS_URL: redis://redis:6379/0
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost","https://${PUBLIC_HOSTNAME:-example.com}"]'
+      XTTS_DEVICE: ${XTTS_DEVICE:-cpu}
+      SADTALKER_DEVICE: ${SADTALKER_DEVICE:-cpu}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+    volumes:
+      - storage:/app/storage
+      - models:/app/models
+    ports:
+      - "8000:8000"
+    # Uncomment to use NVIDIA GPU for XTTS/SadTalker:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-/api}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      API_INTERNAL_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+
+  # Optional: expose the app to the public internet via Cloudflare Tunnel.
+  # Set TUNNEL_TOKEN in your .env to enable.
+  cloudflared:
+    image: cloudflare/cloudflared:2024.10.0
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - frontend
+      - backend
+    profiles: ["tunnel"]   # only runs with `docker compose --profile tunnel up`
+
+volumes:
+  pgdata:
+  redisdata:
+  storage:
+  models:

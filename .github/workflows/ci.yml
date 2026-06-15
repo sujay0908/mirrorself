@@ -1,0 +1,156 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  # ─── Backend ──────────────────────────────────────────────────────────
+  backend-lint:
+    name: Backend lint
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: ./backend }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install ruff
+      - run: ruff check .
+
+  backend-test:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mirrorself
+          POSTGRES_PASSWORD: mirrorself
+          POSTGRES_DB: mirrorself_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U mirrorself"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://mirrorself:mirrorself@localhost:5432/mirrorself_test
+      REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: test-secret-not-for-prod
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || 'sk-ant-test' }}
+    defaults:
+      run: { working-directory: ./backend }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run migrations
+        run: alembic upgrade head
+      - name: Run tests
+        run: pytest -q --maxfail=1 --disable-warnings
+
+  # ─── Frontend ─────────────────────────────────────────────────────────
+  frontend-lint:
+    name: Frontend lint
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: ./frontend }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+
+  frontend-typecheck:
+    name: Frontend typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: ./frontend }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    needs: [frontend-lint, frontend-typecheck]
+    defaults:
+      run: { working-directory: ./frontend }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+        env:
+          API_INTERNAL_URL: http://localhost:8000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/.next
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ─── Docker images ────────────────────────────────────────────────────
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: ${{ env.REGISTRY_USERNAME != '' }}
+        with:
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+      - name: Build ${{ matrix.target }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.target }}
+          push: ${{ github.event_name == 'push' && secrets.REGISTRY_USERNAME != '' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/mirrorself-${{ matrix.target }}:latest
+            ghcr.io/${{ github.repository_owner }}/mirrorself-${{ matrix.target }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
