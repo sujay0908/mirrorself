@@ -27,7 +27,7 @@ export function StepGenerate({ token, user, onDone }: { token: string; user: Use
         <Sparkles className="h-10 w-10 mx-auto text-primary" />
         <h2 className="text-lg font-semibold">Bring your twin to life</h2>
         <p className="text-sm text-muted-foreground">
-          We'll generate your talking-head preview. This can take a minute on a GPU, longer on CPU.
+          We&rsquo;ll generate your talking-head preview. This can take a minute on a GPU, longer on CPU.
         </p>
       </div>
 

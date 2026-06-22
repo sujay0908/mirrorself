@@ -30,7 +30,7 @@ export function StepFace({ token, user, onDone }: { token: string; user: UserPri
       <div>
         <h2 className="text-lg font-semibold">Upload a face photo</h2>
         <p className="text-sm text-muted-foreground">
-          A clear, front-facing photo with good lighting. We'll use it to generate a talking head.
+          A clear, front-facing photo with good lighting. We&rsquo;ll use it to generate a talking head.
         </p>
       </div>
 

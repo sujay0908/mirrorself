@@ -63,7 +63,7 @@ export function StepVoice({ token, user, onDone }: { token: string; user: UserPr
       <div>
         <h2 className="text-lg font-semibold">Record 30 seconds of your voice</h2>
         <p className="text-sm text-muted-foreground">
-          Read anything out loud. We'll use it to clone your voice. Minimum 6 seconds, max 2 minutes.
+          Read anything out loud. We&rsquo;ll use it to clone your voice. Minimum 6 seconds, max 2 minutes.
         </p>
       </div>
 

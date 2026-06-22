@@ -36,7 +36,7 @@ export default function OnboardingPage() {
     <main className="min-h-screen container py-10">
       <div className="max-w-2xl mx-auto space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold">Set up {user.username}'s twin</h1>
+          <h1 className="text-2xl font-semibold">Set up {user.username}&rsquo;s twin</h1>
           <p className="text-sm text-muted-foreground mt-1">Step {step + 1} of {STEPS.length}</p>
         </div>
         <Progress value={progress} />

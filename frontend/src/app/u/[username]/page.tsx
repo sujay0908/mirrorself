@@ -95,7 +95,7 @@ export default function PublicTwinPage() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
-              @{username} doesn't exist, or hasn't made their twin public yet.
+              @{username} doesn&rsquo;t exist, or hasn&rsquo;t made their twin public yet.
             </p>
             <Button className="mt-4" onClick={() => router.push("/")}>Go home</Button>
           </CardContent>
@@ -138,7 +138,7 @@ export default function PublicTwinPage() {
           {messages.length === 0 && (
             <div className="text-center text-muted-foreground mt-12">
               <MessageCircle className="h-8 w-8 mx-auto mb-2" />
-              <p>You're talking to {profile.display_name ?? profile.username}'s digital twin.</p>
+              <p>You&rsquo;re talking to {profile.display_name ?? profile.username}&rsquo;s digital twin.</p>
               <p className="text-sm mt-1">It will respond in their voice and tone.</p>
             </div>
           )}

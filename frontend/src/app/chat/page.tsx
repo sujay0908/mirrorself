@@ -81,7 +81,7 @@ export default function ChatPage() {
             <AvatarImage src={user.face_photo_path || undefined} />
             <AvatarFallback>{user.display_name?.[0] ?? user.username[0]}</AvatarFallback>
           </Avatar>
-          Talking to {user.display_name ?? user.username}'s twin
+          Talking to {user.display_name ?? user.username}&rsquo;s twin
         </div>
         <Button variant="outline" size="sm" onClick={() => router.push("/settings")}>
           Settings
