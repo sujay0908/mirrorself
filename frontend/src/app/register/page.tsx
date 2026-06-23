@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { register } from "@/lib/api";
+import { bootstrapAuth } from "@/lib/api";
 import { useAuth } from "@/lib/auth-store";
+import { supabase } from "@/lib/supabase/client";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -23,11 +24,33 @@ export default function RegisterPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await register({ email, username, password, display_name: displayName || undefined });
-      setSession(res.access_token, res.user);
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            username,
+            display_name: displayName || username,
+          },
+        },
+      });
+      if (error) throw error;
+
+      const session = data.session;
+      if (!session?.access_token) {
+        toast.success("Check your email to confirm your account, then log in.");
+        router.push("/login");
+        return;
+      }
+
+      const user = await bootstrapAuth(session.access_token, {
+        username,
+        display_name: displayName || undefined,
+      });
+      setSession(session.access_token, user);
       router.push("/onboarding");
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail ?? "Registration failed");
+      toast.error(err?.response?.data?.detail ?? err?.message ?? "Registration failed");
     } finally {
       setLoading(false);
     }

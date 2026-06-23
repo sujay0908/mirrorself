@@ -305,17 +305,70 @@ GitHub Actions runs on every push and PR (`.github/workflows/ci.yml`):
   `DELETE /api/v1/me/facts/{id}` to forget something specific.
 - **Inspect Redis**: `redis-cli LRANGE mirrorself:user:1:facts 0 -1`.
 
+## Deployment
+
+MirrorSelf is built for **production deployment** to Google Cloud. The
+recommended stack is:
+
+- **Frontend**: Firebase App Hosting (Next.js with server-side route handlers)
+- **Backend**: Google Cloud Run (FastAPI)
+- **Database**: Supabase Postgres (with transaction pooler for Cloud Run)
+- **Media storage**: Supabase Storage (replaces local filesystem)
+- **Short-term memory**: Upstash Redis (managed Redis)
+- **Auth**: Supabase Auth (replaces custom JWT)
+
+### Deployment guides
+
+Start with **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for a complete overview.
+
+Then follow these step-by-step guides:
+
+1. **[docs/deployment-checklist.md](docs/deployment-checklist.md)** —
+   Phase-by-phase checklist for deployment
+2. **[docs/cloud-run-deployment.md](docs/cloud-run-deployment.md)** —
+   Deploy FastAPI backend to Google Cloud Run
+3. **[docs/firebase-deployment.md](docs/firebase-deployment.md)** —
+   Deploy Next.js frontend to Firebase App Hosting
+4. **[docs/deployment-firebase-cloudrun-supabase.md](docs/deployment-firebase-cloudrun-supabase.md)** —
+   Deep-dive architecture plan and rationale
+
+### Quick deployment (Linux/Mac)
+
+After setting up GCP and Firebase projects:
+
+```bash
+# Backend: Deploy to Cloud Run
+export GCP_PROJECT_ID="your-gcp-project"
+export SERVICE_REGION="us-central1"
+bash scripts/deploy-cloud-run.sh
+
+# Frontend: Deploy to Firebase
+firebase deploy --only hosting
+```
+
+### Why this stack?
+
+| Layer | Service | Why |
+|-------|---------|-----|
+| Frontend | Firebase App Hosting | Native Next.js support, auto-deploy from GitHub, CDN, free domain |
+| Backend | Cloud Run | Stateless HTTP, auto-scale, integrates with Secret Manager, container-based |
+| Database | Supabase Postgres | Managed, transaction pooler for Cloud Run, simple setup |
+| Storage | Supabase Storage | Replaces ephemeral Cloud Run filesystem, signed URLs, buckets |
+| Auth | Supabase Auth | JWT tokens, replaces custom auth implementation |
+| Memory | Upstash Redis | Managed Redis, no VPC setup, works with Cloud Run |
+
 ## Production checklist
 
+- [ ] Deploy to Cloud Run + Firebase (see [Deployment guides](#deployment))
 - [ ] `SECRET_KEY` set to a strong random value
-- [ ] `ANTHROPIC_API_KEY` set
+- [ ] `ANTHROPIC_API_KEY` set (via Secret Manager on Cloud Run)
 - [ ] `CORS_ORIGINS` restricted to your real frontend origin
 - [ ] `PUBLIC_BASE_URL` set to your real public URL
-- [ ] `XTTS_DEVICE=cuda` and `SADTALKER_DEVICE=cuda` if you have a GPU
-- [ ] Postgres backups enabled
-- [ ] Redis persistence enabled (`appendonly yes`)
-- [ ] Cloudflare Tunnel (or equivalent) in front for TLS + DDoS
-- [ ] Rate limiting on `/api/v1/chat` (e.g. Cloudflare WAF rule)
+- [ ] Supabase Auth redirects configured for your domain
+- [ ] Supabase Storage buckets created and configured
+- [ ] Database backups enabled
+- [ ] Error logging and monitoring active
+- [ ] Rate limiting configured (Cloud Armor or Cloudflare)
 
 ## License
 

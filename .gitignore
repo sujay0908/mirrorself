@@ -54,3 +54,6 @@ backend/logs/
 
 # ─── Cloudflare ────────────────────────────────────────────────────────
 cloudflared/*.json
+
+#scripts
+scripts/

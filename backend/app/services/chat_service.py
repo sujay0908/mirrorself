@@ -5,6 +5,7 @@ Top-level orchestrator. Wires sentiment -> prompt -> LLM -> voice -> avatar
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import select
@@ -19,6 +20,7 @@ from app.services.llm_service import llm_service
 from app.services.memory_service import memory_service
 from app.services.prompt_service import build_system_prompt
 from app.services.sentiment import sentiment_analyzer
+from app.services.storage_service import storage_service
 from app.services.voice_service import voice_service
 
 
@@ -105,12 +107,41 @@ class ChatService:
         )
         audio_path, new_facts_raw = await asyncio.gather(voice_task, fact_task)
 
+        # Upload audio to Supabase Storage
+        audio_object_path: Optional[str] = None
+        if audio_path:
+            try:
+                with open(audio_path, "rb") as f:
+                    audio_data = f.read()
+                filename = Path(audio_path).name
+                audio_object_path = await storage_service.upload_voice_output(
+                    user.id, audio_data, filename
+                )
+            except Exception as e:
+                logger.error(f"Failed to upload audio: {e}")
+
         # 9. Optional avatar (only if user has a face photo)
-        video_path: Optional[str] = None
+        video_object_path: Optional[str] = None
         if user.face_photo_path and user.twin_status == "ready":
-            video_path = await avatar_service.generate_talking_head(
-                user.face_photo_path, audio_path, user.id
+            # Download face photo for processing
+            face_local = await storage_service.download_for_processing(
+                "face-photos", user.face_photo_path
             )
+            video_path = await avatar_service.generate_talking_head(
+                face_local, audio_path, user.id
+            )
+            
+            # Upload video to Supabase Storage
+            if video_path:
+                try:
+                    with open(video_path, "rb") as f:
+                        video_data = f.read()
+                    filename = Path(video_path).name
+                    video_object_path = await storage_service.upload_avatar_video(
+                        user.id, video_data, filename
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to upload video: {e}")
 
         # 10. Persist assistant message
         assistant_msg = Message(
@@ -119,8 +150,8 @@ class ChatService:
             content=assistant_text,
             detected_emotion=sentiment.emotion,
             response_tone=sentiment.tone,
-            audio_path=audio_path,
-            video_path=video_path,
+            audio_path=audio_object_path,
+            video_path=video_object_path,
         )
         db.add(assistant_msg)
         await db.flush()

@@ -13,6 +13,7 @@ from app.models.user import User
 from app.schemas.user import PersonalityProfile, UserPrivate
 from app.services.avatar_service import avatar_service
 from app.services.voice_service import voice_service
+from app.services.storage_service import storage_service
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -28,29 +29,35 @@ async def upload_face(
     if photo.content_type not in settings.ALLOWED_IMAGE_TYPES:
         raise HTTPException(400, f"Unsupported image type: {photo.content_type}")
 
+    # Read file into memory
+    file_data = await photo.read()
+    if len(file_data) > settings.UPLOAD_MAX_SIZE_MB * 1024 * 1024:
+        raise HTTPException(413, "File too large")
+
+    # Save to temporary local path for validation
     tmp_path = Path(settings.FACE_PHOTOS_DIR) / f"tmp_{current_user.id}_{photo.filename}"
     tmp_path.parent.mkdir(parents=True, exist_ok=True)
-    size = 0
     with tmp_path.open("wb") as f:
-        while chunk := await photo.read(1024 * 1024):
-            size += len(chunk)
-            if size > settings.UPLOAD_MAX_SIZE_MB * 1024 * 1024:
-                f.close()
-                tmp_path.unlink(missing_ok=True)
-                raise HTTPException(413, "File too large")
-            f.write(chunk)
+        f.write(file_data)
 
-    ok, msg = await avatar_service.validate_photo(str(tmp_path))
-    if not ok:
+    try:
+        ok, msg = await avatar_service.validate_photo(str(tmp_path))
+        if not ok:
+            tmp_path.unlink(missing_ok=True)
+            raise HTTPException(400, msg)
+
+        # Upload to Supabase Storage
+        object_path = await storage_service.upload_face_photo(
+            current_user.id, file_data, photo.filename or "photo.jpg"
+        )
+
+        # Store object path (not full URL) in database
+        current_user.face_photo_path = object_path
+        await db.commit()
+        await db.refresh(current_user)
+        return UserPrivate.model_validate(current_user)
+    finally:
         tmp_path.unlink(missing_ok=True)
-        raise HTTPException(400, msg)
-
-    saved = await avatar_service.save_face_photo(str(tmp_path), current_user.id)
-    tmp_path.unlink(missing_ok=True)
-    current_user.face_photo_path = saved
-    await db.commit()
-    await db.refresh(current_user)
-    return UserPrivate.model_validate(current_user)
 
 
 @router.post("/voice", response_model=UserPrivate)
@@ -62,30 +69,38 @@ async def upload_voice(
     if audio.content_type not in settings.ALLOWED_AUDIO_TYPES:
         raise HTTPException(400, f"Unsupported audio type: {audio.content_type}")
 
+    # Read file into memory
+    file_data = await audio.read()
+    if len(file_data) > settings.UPLOAD_MAX_SIZE_MB * 1024 * 1024:
+        raise HTTPException(413, "File too large")
+
+    # Save to temporary local path for validation and processing
     tmp_path = Path(settings.VOICE_SAMPLES_DIR) / f"tmp_{current_user.id}_{audio.filename or 'sample.wav'}"
     tmp_path.parent.mkdir(parents=True, exist_ok=True)
-    size = 0
     with tmp_path.open("wb") as f:
-        while chunk := await audio.read(1024 * 1024):
-            size += len(chunk)
-            if size > settings.UPLOAD_MAX_SIZE_MB * 1024 * 1024:
-                f.close()
-                tmp_path.unlink(missing_ok=True)
-                raise HTTPException(413, "File too large")
-            f.write(chunk)
+        f.write(file_data)
 
-    ok, msg = await voice_service.validate_sample(str(tmp_path))
-    if not ok:
+    try:
+        ok, msg = await voice_service.validate_sample(str(tmp_path))
+        if not ok:
+            tmp_path.unlink(missing_ok=True)
+            raise HTTPException(400, msg)
+
+        # Voice cloning - keeps normalized voice in local storage
+        voice_id = await voice_service.clone_voice(str(tmp_path), current_user.id)
+
+        # Upload original voice sample to Supabase Storage
+        object_path = await storage_service.upload_voice_sample(
+            current_user.id, file_data, audio.filename or f"{voice_id}.wav"
+        )
+
+        current_user.voice_id = voice_id
+        current_user.voice_sample_path = object_path
+        await db.commit()
+        await db.refresh(current_user)
+        return UserPrivate.model_validate(current_user)
+    finally:
         tmp_path.unlink(missing_ok=True)
-        raise HTTPException(400, msg)
-
-    voice_id = await voice_service.clone_voice(str(tmp_path), current_user.id)
-    tmp_path.unlink(missing_ok=True)
-    current_user.voice_id = voice_id
-    current_user.voice_sample_path = str(Path(settings.VOICE_SAMPLES_DIR) / f"{voice_id}.wav")
-    await db.commit()
-    await db.refresh(current_user)
-    return UserPrivate.model_validate(current_user)
 
 
 @router.post("/quiz", response_model=UserPrivate)
@@ -118,14 +133,36 @@ async def generate_avatar(
     current_user.twin_status = "processing"
     await db.commit()
 
-    # Use the user's existing voice sample as a stand-in audio for a "hello" preview
-    sample_audio = current_user.voice_sample_path
-    if sample_audio:
-        video = await avatar_service.generate_talking_head(
-            current_user.face_photo_path, sample_audio, current_user.id
+    try:
+        # Download face photo from storage for processing
+        face_photo_local = await storage_service.download_for_processing(
+            "face-photos", current_user.face_photo_path
         )
-        current_user.avatar_video_path = video
-    current_user.twin_status = "ready"
-    await db.commit()
-    await db.refresh(current_user)
-    return UserPrivate.model_validate(current_user)
+        
+        # Use the user's normalized voice sample from local storage for generation
+        voice_sample = Path(settings.VOICE_SAMPLES_DIR) / f"{current_user.voice_id}.wav"
+        if not voice_sample.exists():
+            raise HTTPException(400, "Voice sample not found")
+
+        # Generate the talking head
+        video = await avatar_service.generate_talking_head(
+            face_photo_local, str(voice_sample), current_user.id
+        )
+
+        # Upload generated video to Supabase Storage
+        with open(video, "rb") as f:
+            video_data = f.read()
+        object_path = await storage_service.upload_avatar_video(
+            current_user.id, video_data, Path(video).name
+        )
+
+        current_user.avatar_video_path = object_path
+        current_user.twin_status = "ready"
+        await db.commit()
+        await db.refresh(current_user)
+        return UserPrivate.model_validate(current_user)
+    except Exception as e:
+        logger.error(f"Avatar generation failed for user {current_user.id}: {e}")
+        current_user.twin_status = "failed"
+        await db.commit()
+        raise HTTPException(500, f"Avatar generation failed: {e}")

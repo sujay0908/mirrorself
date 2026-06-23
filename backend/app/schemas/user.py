@@ -19,6 +19,11 @@ class UserLogin(BaseModel):
     password: str
 
 
+class UserBootstrap(BaseModel):
+    username: Optional[str] = Field(default=None, min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9_.-]+$")
+    display_name: Optional[str] = Field(default=None, max_length=120)
+
+
 class PersonalityProfile(BaseModel):
     values: list[str] = []
     communication_style: Optional[str] = None

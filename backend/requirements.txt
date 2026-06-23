@@ -27,8 +27,8 @@ transformers==4.46.0
 vaderSentiment==3.3.2
 textblob==0.18.0.post0
 loguru==0.7.2
-python-cors==1.0.1
 email-validator==2.2.0
+supabase==2.4.5
 
 # dev
 pytest==8.3.3

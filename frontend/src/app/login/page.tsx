@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { login } from "@/lib/api";
+import { bootstrapAuth } from "@/lib/api";
 import { useAuth } from "@/lib/auth-store";
+import { supabase } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,11 +22,15 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await login({ email, password });
-      setSession(res.access_token, res.user);
-      router.push(res.user.is_onboarded ? "/chat" : "/onboarding");
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      const session = data.session;
+      if (!session?.access_token) throw new Error("Supabase did not return an access token");
+      const user = await bootstrapAuth(session.access_token);
+      setSession(session.access_token, user);
+      router.push(user.is_onboarded ? "/chat" : "/onboarding");
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail ?? "Login failed");
+      toast.error(err?.response?.data?.detail ?? err?.message ?? "Login failed");
     } finally {
       setLoading(false);
     }

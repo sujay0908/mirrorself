@@ -17,9 +17,10 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
 
     # Auth
+    supabase_user_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True, nullable=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    hashed_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Profile
     display_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
@@ -28,11 +29,13 @@ class User(Base):
 
     # Onboarding
     is_onboarded: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Supabase Storage object paths (e.g., "user_123/photo.jpg") or signed URLs
     face_photo_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     voice_sample_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
     # Twin / avatar
     voice_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    # Supabase Storage object path for avatar video (e.g., "user_123/avatar.mp4")
     avatar_video_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     twin_status: Mapped[str] = mapped_column(
         String(32), default="pending", server_default="pending"

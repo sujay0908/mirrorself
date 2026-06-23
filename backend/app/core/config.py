@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     CLAUDE_MODEL: str = "claude-sonnet-4-5"
     CLAUDE_MAX_TOKENS: int = 1024
 
+    # Supabase
+    SUPABASE_URL: str = ""
+    SUPABASE_PUBLISHABLE_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    SUPABASE_JWKS_URL: str = ""  # Optional: for local JWT verification in production
+
     # XTTS
     XTTS_MODEL_DIR: str = "./models/xtts"
     XTTS_DEVICE: str = "cuda"  # or "cpu"

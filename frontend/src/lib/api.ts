@@ -56,6 +56,11 @@ export type UserPrivate = {
 
 export type UserPublic = Omit<UserPrivate, "email" | "personality" | "conversation_count" | "voice_id" | "face_photo_path">;
 
+export type AuthBootstrapPayload = {
+  username?: string;
+  display_name?: string;
+};
+
 export type MessageOut = {
   id: number;
   role: "user" | "assistant";
@@ -82,20 +87,13 @@ export type ConversationSummary = {
   message_count: number;
 };
 
-// --- Auth -----------------------------------------------------------------
-
-export async function register(payload: { email: string; username: string; password: string; display_name?: string }) {
-  const { data } = await client().post("/v1/auth/register", payload);
-  return data as { access_token: string; user: UserPrivate };
-}
-
-export async function login(payload: { email: string; password: string }) {
-  const { data } = await client().post("/v1/auth/login", payload);
-  return data as { access_token: string; user: UserPrivate };
-}
-
 export async function me(token: string) {
   const { data } = await client(token).get("/v1/auth/me");
+  return data as UserPrivate;
+}
+
+export async function bootstrapAuth(token: string, payload: AuthBootstrapPayload = {}) {
+  const { data } = await client(token).post("/v1/auth/bootstrap", payload);
   return data as UserPrivate;
 }
 

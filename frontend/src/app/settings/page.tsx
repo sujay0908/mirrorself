@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-store";
 import { updateMe } from "@/lib/api";
+import { supabase } from "@/lib/supabase/client";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -99,7 +100,7 @@ export default function SettingsPage() {
       </Card>
 
       <div className="flex justify-between">
-        <Button variant="outline" onClick={() => { logout(); router.push("/"); }}>
+        <Button variant="outline" onClick={async () => { await supabase.auth.signOut(); logout(); router.push("/"); }}>
           <LogOut className="h-4 w-4 mr-2" /> Log out
         </Button>
         <Button onClick={save} disabled={saving}>
