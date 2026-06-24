@@ -317,33 +317,56 @@ recommended stack is:
 - **Short-term memory**: Upstash Redis (managed Redis)
 - **Auth**: Supabase Auth (replaces custom JWT)
 
-### Deployment guides
+### Quick start → Production (Windows/Mac/Linux)
 
-Start with **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for a complete overview.
+**⏱️ ~60 minutes to production**
 
-Then follow these step-by-step guides:
+Read and follow: **[DO_THIS_NOW.md](DO_THIS_NOW.md)**
 
-1. **[docs/deployment-checklist.md](docs/deployment-checklist.md)** —
-   Phase-by-phase checklist for deployment
-2. **[docs/cloud-run-deployment.md](docs/cloud-run-deployment.md)** —
-   Deploy FastAPI backend to Google Cloud Run
-3. **[docs/firebase-deployment.md](docs/firebase-deployment.md)** —
-   Deploy Next.js frontend to Firebase App Hosting
-4. **[docs/deployment-firebase-cloudrun-supabase.md](docs/deployment-firebase-cloudrun-supabase.md)** —
-   Deep-dive architecture plan and rationale
+This guide walks you through:
+1. Installing Google Cloud CLI
+2. Creating Supabase storage buckets
+3. Running database migration
+4. Creating Google Cloud secrets
+5. Deploying backend to Cloud Run
+6. Deploying frontend to Firebase
+7. Verifying everything works
 
-### Quick deployment (Linux/Mac)
+### Detailed deployment guides
 
-After setting up GCP and Firebase projects:
+- **[DEPLOYMENT_START_HERE.md](DEPLOYMENT_START_HERE.md)** — Overview and prerequisites
+- **[SETUP_GOOGLE_CLOUD.md](SETUP_GOOGLE_CLOUD.md)** — Detailed GCP setup
+- **[RUN_MIGRATION.md](RUN_MIGRATION.md)** — Database migration help
+- **[DEPLOYMENT_EXECUTION.md](DEPLOYMENT_EXECUTION.md)** — Complete checklist
+- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — Architecture overview
+- **[docs/cloud-run-deployment.md](docs/cloud-run-deployment.md)** —
+  Cloud Run deployment guide
+- **[docs/firebase-deployment.md](docs/firebase-deployment.md)** —
+  Firebase deployment guide
+- **[docs/deployment-firebase-cloudrun-supabase.md](docs/deployment-firebase-cloudrun-supabase.md)** —
+  Deep-dive architecture plan and rationale
 
+### Deployment scripts
+
+Windows:
+```powershell
+# Create secrets
+.\scripts\create-secrets.ps1
+
+# Deploy backend
+.\scripts\deploy-cloud-run-windows.ps1
+
+# Deploy frontend
+firebase deploy
+```
+
+Linux/Mac:
 ```bash
-# Backend: Deploy to Cloud Run
-export GCP_PROJECT_ID="your-gcp-project"
-export SERVICE_REGION="us-central1"
+# Deploy backend
 bash scripts/deploy-cloud-run.sh
 
-# Frontend: Deploy to Firebase
-firebase deploy --only hosting
+# Deploy frontend
+firebase deploy
 ```
 
 ### Why this stack?
