@@ -106,9 +106,9 @@ INFO [alembic.runtime.migration] Done.
 # Set environment variables with YOUR credentials:
 $env:SUPABASE_URL = "https://ihygwqrqkvkwlpzjrhdg.supabase.co"
 $env:SUPABASE_PUBLISHABLE_KEY = "sb_publishable_JbcTkFomYiFfUsHosr5r1w_rZMrgEQq"
-$env:SUPABASE_SERVICE_ROLE_KEY = "[paste your service role key]"
+$env:SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImloeWd3cXJxa3Zrd2xwempyaGRnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjEyMjMzMywiZXhwIjoyMDk3Njk4MzMzfQ.Rgo8YOX24z2KJW5sPk-fcVN-CBtjVaxpTRMJPs0ofeE"
 $env:SUPABASE_JWKS_URL = "https://ihygwqrqkvkwlpzjrhdg.supabase.co/auth/v1/.well-known/jwks.json"
-$env:DATABASE_URL = "[paste your pooler connection string]"
+$env:DATABASE_URL = "postgresql://postgres:Sujaygodugu%400908@db.ihygwqrqkvkwlpzjrhdg.supabase.co:5432/postgres"
 $env:REDIS_URL = "redis://default:gQAAAAAAAaTTAAIgcDEzMjJhNDE5ZGE3OGM0MzgxYjcxMGIwMTk4MmJjMmRjOA@immortal-hagfish-107731.upstash.io:6379"
 $env:ANTHROPIC_API_KEY = "sk-ant-test-12345"
 

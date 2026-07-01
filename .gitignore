@@ -57,3 +57,11 @@ cloudflared/*.json
 
 #scripts
 scripts/
+.env
+.env.example
+.env.local
+DEPLOYMENT_EXECUTION.md
+DEPLOYMENT_START_HERE.md
+DO_THIS_NOW.md
+RUN_MIGRATION.md
+SETUP_GOOGLE_CLOUD.md
