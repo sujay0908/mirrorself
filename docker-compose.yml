@@ -52,10 +52,19 @@ services:
       redis: { condition: service_healthy }
     environment:
       APP_ENV: production
+      DEBUG: "false"
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production-please}
       DATABASE_URL: postgresql+asyncpg://mirrorself:mirrorself@postgres:5432/mirrorself
+      DATABASE_URL_SYNC: postgresql://mirrorself:mirrorself@postgres:5432/mirrorself
       REDIS_URL: redis://redis:6379/0
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-}
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
+      FIREBASE_STORAGE_BUCKET: ${FIREBASE_STORAGE_BUCKET:-}
+      FIREBASE_STORAGE_URL_MODE: ${FIREBASE_STORAGE_URL_MODE:-firebase_token}
+      STORAGE_URL_TTL_SECONDS: ${STORAGE_URL_TTL_SECONDS:-3600}
       CORS_ORIGINS: '["http://localhost:3000","http://localhost","https://${PUBLIC_HOSTNAME:-example.com}"]'
       XTTS_DEVICE: ${XTTS_DEVICE:-cpu}
       SADTALKER_DEVICE: ${SADTALKER_DEVICE:-cpu}

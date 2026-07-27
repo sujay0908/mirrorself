@@ -8,7 +8,6 @@ without needing the heavy ML dependencies.
 from __future__ import annotations
 
 import os
-import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -43,57 +42,33 @@ async def test_health(client: AsyncClient) -> None:
 
 
 @pytest.mark.anyio
-async def test_register_and_login(client: AsyncClient) -> None:
-    email = f"{uuid.uuid4().hex[:8]}@example.com"
-    username = f"u_{uuid.uuid4().hex[:8]}"
-    password = "supersecret123"
-
-    r = await client.post(
-        "/api/v1/auth/register",
-        json={"email": email, "username": username, "password": password, "display_name": "Test"},
-    )
-    assert r.status_code == 201, r.text
-    body = r.json()
-    assert body["user"]["email"] == email
-    assert body["user"]["username"] == username
-    assert "access_token" in body
-
-    r2 = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": password}
-    )
-    assert r2.status_code == 200
-    assert "access_token" in r2.json()
-
-
-@pytest.mark.anyio
-async def test_register_duplicate_email(client: AsyncClient) -> None:
-    email = f"{uuid.uuid4().hex[:8]}@example.com"
-    payload = {
-        "email": email,
-        "username": f"u_{uuid.uuid4().hex[:8]}",
-        "password": "supersecret123",
-    }
-    r = await client.post("/api/v1/auth/register", json=payload)
-    assert r.status_code == 201
-    r2 = await client.post("/api/v1/auth/register", json=payload)
-    assert r2.status_code == 409
-
-
-@pytest.mark.anyio
 async def test_unauthenticated_me_is_401(client: AsyncClient) -> None:
     r = await client.get("/api/v1/auth/me")
     assert r.status_code == 401
 
 
 @pytest.mark.anyio
-async def test_login_wrong_password(client: AsyncClient) -> None:
-    email = f"{uuid.uuid4().hex[:8]}@example.com"
-    await client.post(
-        "/api/v1/auth/register",
-        json={"email": email, "username": f"u_{uuid.uuid4().hex[:8]}", "password": "supersecret123"},
-    )
+async def test_legacy_register_endpoint_returns_gone(client: AsyncClient) -> None:
     r = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": "wrong-password"}
+        "/api/v1/auth/register",
+        json={"email": "test@example.com", "username": "tester", "password": "supersecret123"},
+    )
+    assert r.status_code == 410
+
+
+@pytest.mark.anyio
+async def test_legacy_login_endpoint_returns_gone(client: AsyncClient) -> None:
+    r = await client.post(
+        "/api/v1/auth/login", json={"email": "test@example.com", "password": "supersecret123"}
+    )
+    assert r.status_code == 410
+
+
+@pytest.mark.anyio
+async def test_bootstrap_requires_authentication(client: AsyncClient) -> None:
+    r = await client.post(
+        "/api/v1/auth/bootstrap",
+        json={"username": "tester", "display_name": "Test User"},
     )
     assert r.status_code == 401
 
@@ -123,7 +98,7 @@ async def test_prompt_service_includes_personality() -> None:
 async def test_sentiment_quick_returns_tone() -> None:
     from app.services.sentiment import sentiment_analyzer
 
-    r = await sentiment_analyzer.quick("I am so happy today!!")
+    r = sentiment_analyzer.quick("I am so happy today!!")
     assert r.emotion in {"joy", "neutral"}
     assert r.tone in {"playful", "neutral"}
 

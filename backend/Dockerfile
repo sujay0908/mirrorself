@@ -41,4 +41,4 @@ RUN mkdir -p /app/storage/voice_samples /app/storage/voice_output \
 EXPOSE 8000
 
 # Default: run uvicorn. Override CMD for worker / gunicorn deployments.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

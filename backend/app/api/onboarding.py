@@ -3,7 +3,7 @@ Onboarding endpoints: face photo upload, voice sample upload, personality quiz.
 """
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.api.deps import get_current_user
 from app.core.config import settings
@@ -12,6 +12,7 @@ from app.core.logging import logger
 from app.models.user import User
 from app.schemas.user import PersonalityProfile, UserPrivate
 from app.services.avatar_service import avatar_service
+from app.services.response_mapper import map_user_private
 from app.services.voice_service import voice_service
 from app.services.storage_service import storage_service
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,7 +56,7 @@ async def upload_face(
         current_user.face_photo_path = object_path
         await db.commit()
         await db.refresh(current_user)
-        return UserPrivate.model_validate(current_user)
+        return await map_user_private(current_user)
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -98,7 +99,7 @@ async def upload_voice(
         current_user.voice_sample_path = object_path
         await db.commit()
         await db.refresh(current_user)
-        return UserPrivate.model_validate(current_user)
+        return await map_user_private(current_user)
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -115,7 +116,7 @@ async def submit_quiz(
     await db.commit()
     await db.refresh(current_user)
     logger.info(f"User {current_user.id} completed onboarding; twin processing started.")
-    return UserPrivate.model_validate(current_user)
+    return await map_user_private(current_user)
 
 
 @router.post("/generate-avatar", response_model=UserPrivate)
@@ -129,15 +130,13 @@ async def generate_avatar(
             "Need both a face photo and a voice sample before generating your avatar.",
         )
     if current_user.twin_status == "ready":
-        return UserPrivate.model_validate(current_user)
+        return await map_user_private(current_user)
     current_user.twin_status = "processing"
     await db.commit()
 
     try:
         # Download face photo from storage for processing
-        face_photo_local = await storage_service.download_for_processing(
-            "face-photos", current_user.face_photo_path
-        )
+        face_photo_local = await storage_service.download_for_processing(current_user.face_photo_path)
         
         # Use the user's normalized voice sample from local storage for generation
         voice_sample = Path(settings.VOICE_SAMPLES_DIR) / f"{current_user.voice_id}.wav"
@@ -160,7 +159,7 @@ async def generate_avatar(
         current_user.twin_status = "ready"
         await db.commit()
         await db.refresh(current_user)
-        return UserPrivate.model_validate(current_user)
+        return await map_user_private(current_user)
     except Exception as e:
         logger.error(f"Avatar generation failed for user {current_user.id}: {e}")
         current_user.twin_status = "failed"

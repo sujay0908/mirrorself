@@ -4,7 +4,7 @@ Revision ID: 0001_initial
 Revises:
 Create Date: 2026-01-01 00:00:00
 """
-from typing import Sequence, Union
+from typing import Union
 
 import sqlalchemy as sa
 from alembic import op

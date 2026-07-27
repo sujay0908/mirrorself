@@ -28,7 +28,7 @@ vaderSentiment==3.3.2
 textblob==0.18.0.post0
 loguru==0.7.2
 email-validator==2.2.0
-supabase==2.4.5
+google-cloud-storage==2.19.0
 
 # dev
 pytest==8.3.3

@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.security import SupabaseIdentity
 from app.models.user import User
 from app.schemas.user import TokenResponse, UserBootstrap, UserCreate, UserLogin, UserPrivate
+from app.services.response_mapper import map_user_private
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -40,7 +41,7 @@ async def bootstrap(
         await db.execute(select(User).where(User.supabase_user_id == identity.user_id))
     ).scalar_one_or_none()
     if existing:
-        return UserPrivate.model_validate(existing)
+        return await map_user_private(existing)
 
     if not identity.email:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Supabase user is missing an email")
@@ -59,7 +60,7 @@ async def bootstrap(
             by_email.display_name = payload.display_name
         await db.commit()
         await db.refresh(by_email)
-        return UserPrivate.model_validate(by_email)
+        return await map_user_private(by_email)
 
     if not username:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Username is required to create your profile")
@@ -82,9 +83,9 @@ async def bootstrap(
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    return UserPrivate.model_validate(user)
+    return await map_user_private(user)
 
 
 @router.get("/me", response_model=UserPrivate)
 async def me(current_user: User = Depends(get_current_user)) -> UserPrivate:
-    return UserPrivate.model_validate(current_user)
+    return await map_user_private(current_user)

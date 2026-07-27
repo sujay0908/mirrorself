@@ -2,9 +2,9 @@
 Chat-related schemas.
 """
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatRequest(BaseModel):
@@ -21,22 +21,9 @@ class MessageOut(BaseModel):
     content: str
     detected_emotion: Optional[str] = None
     response_tone: Optional[str] = None
-    # Store Supabase Storage object paths, but expose as URLs
-    audio_path: Optional[str] = Field(None, alias="audio_url", exclude=True)
-    video_path: Optional[str] = Field(None, alias="video_url", exclude=True)
     audio_url: Optional[str] = None
     video_url: Optional[str] = None
     created_at: datetime
-
-    @field_serializer("audio_url")
-    def serialize_audio_url(self, value: Optional[str]) -> Optional[str]:
-        """Return audio_path as audio_url (already object path from storage)."""
-        return self.audio_path
-
-    @field_serializer("video_url")
-    def serialize_video_url(self, value: Optional[str]) -> Optional[str]:
-        """Return video_path as video_url (already object path from storage)."""
-        return self.video_path
 
 
 class ChatResponse(BaseModel):

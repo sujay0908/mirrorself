@@ -2,7 +2,9 @@
 Application configuration loaded from environment variables.
 """
 from functools import lru_cache
-from typing import List
+from typing import Any, List
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +43,16 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     SUPABASE_JWKS_URL: str = ""  # Optional: for local JWT verification in production
 
+    # Google Cloud / Firebase Storage
+    GCP_PROJECT_ID: str = ""
+    FIREBASE_STORAGE_BUCKET: str = ""
+    FIREBASE_STORAGE_URL_MODE: str = "firebase_token"  # firebase_token | signed_url | public_url
+    STORAGE_URL_TTL_SECONDS: int = 3600
+    STORAGE_FACE_PREFIX: str = "face-photos"
+    STORAGE_VOICE_SAMPLES_PREFIX: str = "voice-samples"
+    STORAGE_VOICE_OUTPUT_PREFIX: str = "voice-output"
+    STORAGE_AVATARS_PREFIX: str = "avatars"
+
     # XTTS
     XTTS_MODEL_DIR: str = "./models/xtts"
     XTTS_DEVICE: str = "cuda"  # or "cpu"
@@ -65,6 +77,21 @@ class Settings(BaseSettings):
 
     # Logging
     LOG_LEVEL: str = "INFO"
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug(cls, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return True
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on", "debug", "development", "dev"}:
+                return True
+            if normalized in {"0", "false", "no", "off", "release", "production", "prod"}:
+                return False
+        return bool(value)
 
 
 @lru_cache

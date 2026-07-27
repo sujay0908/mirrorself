@@ -126,7 +126,10 @@ Created/Updated: 7
 Failed: 0
 ✅ All secrets created successfully!
 ```
+use this 
 
+
+DATABASE_URL="postgresql+asyncpg://postgres:Sujaygodugu%400908@db.ihygwqrqkvkwlpzjrhdg.supabase.co:5432/postgres"
 ---
 
 ### Action 6: Deploy Backend to Cloud Run (15 minutes)

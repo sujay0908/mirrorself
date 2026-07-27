@@ -14,11 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import logger
 from app.models.conversation import Conversation, Message
 from app.models.user import User
-from app.schemas.chat import ChatResponse, MessageOut
+from app.schemas.chat import ChatResponse
 from app.services.avatar_service import avatar_service
 from app.services.llm_service import llm_service
 from app.services.memory_service import memory_service
 from app.services.prompt_service import build_system_prompt
+from app.services.response_mapper import map_message
 from app.services.sentiment import sentiment_analyzer
 from app.services.storage_service import storage_service
 from app.services.voice_service import voice_service
@@ -124,9 +125,7 @@ class ChatService:
         video_object_path: Optional[str] = None
         if user.face_photo_path and user.twin_status == "ready":
             # Download face photo for processing
-            face_local = await storage_service.download_for_processing(
-                "face-photos", user.face_photo_path
-            )
+            face_local = await storage_service.download_for_processing(user.face_photo_path)
             video_path = await avatar_service.generate_talking_head(
                 face_local, audio_path, user.id
             )
@@ -177,8 +176,8 @@ class ChatService:
 
         return ChatResponse(
             conversation_id=conv.id,
-            user_message=MessageOut.model_validate(user_msg),
-            assistant_message=MessageOut.model_validate(assistant_msg),
+            user_message=await map_message(user_msg),
+            assistant_message=await map_message(assistant_msg),
             new_facts=new_facts,
         )
 

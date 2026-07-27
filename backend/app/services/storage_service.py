@@ -1,115 +1,114 @@
 """
-Supabase Storage abstraction for media files.
+Firebase Storage / Google Cloud Storage abstraction for media files.
 
-Handles uploading, downloading, and generating URLs for:
-- Face photos
-- Voice samples
-- Voice output (generated audio)
-- Avatar videos
+This service uses the Google Cloud Storage API against the Firebase project's
+bucket. It stores object keys in Postgres and returns browser-friendly media
+URLs for the frontend.
 """
 from __future__ import annotations
 
 import asyncio
-import io
-from datetime import datetime, timedelta, timezone
+import tempfile
+from datetime import timedelta
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 from uuid import uuid4
 
 from app.core.config import settings
 from app.core.logging import logger
 
 try:
-    import httpx
-    from supabase import Client, create_client
-except ImportError:
-    httpx = None
-    Client = None
-    create_client = None
+    from google.cloud import storage
+except ImportError:  # pragma: no cover - dependency validated in runtime/CI
+    storage = None
 
 
 class StorageService:
-    """Manages file uploads/downloads to Supabase Storage."""
+    """Manages uploads, downloads, and browser-facing URLs for media files."""
 
     def __init__(self) -> None:
-        self._client: Optional[Client] = None
-        self._initialized = False
+        self._client: Optional["storage.Client"] = None
+        self._bucket = None
 
-    def _ensure_client(self) -> Client:
-        """Lazy-load Supabase client."""
-        if not self._initialized:
-            if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
-                raise RuntimeError("Supabase credentials not configured")
-            try:
-                self._client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
-                self._initialized = True
-            except Exception as e:
-                logger.error(f"Failed to initialize Supabase client: {e}")
-                raise
+    def _ensure_client(self) -> "storage.Client":
+        if storage is None:
+            raise RuntimeError("google-cloud-storage is not installed")
         if self._client is None:
-            raise RuntimeError("Failed to create Supabase client")
+            self._client = storage.Client(project=settings.GCP_PROJECT_ID or None)
         return self._client
+
+    def _ensure_bucket(self):
+        if not settings.FIREBASE_STORAGE_BUCKET:
+            raise RuntimeError("FIREBASE_STORAGE_BUCKET is not configured")
+        if self._bucket is None:
+            self._bucket = self._ensure_client().bucket(settings.FIREBASE_STORAGE_BUCKET)
+        return self._bucket
+
+    def _build_object_name(self, prefix: str, user_id: int, filename: str) -> str:
+        safe_name = Path(filename).name or "file.bin"
+        return f"{prefix}/user_{user_id}/{safe_name}"
+
+    def _firebase_download_url(self, object_name: str, token: str) -> str:
+        encoded_object_name = quote(object_name, safe="")
+        return (
+            f"https://firebasestorage.googleapis.com/v0/b/{settings.FIREBASE_STORAGE_BUCKET}"
+            f"/o/{encoded_object_name}?alt=media&token={token}"
+        )
+
+    def _public_url(self, object_name: str) -> str:
+        encoded = quote(object_name, safe="/")
+        return f"https://storage.googleapis.com/{settings.FIREBASE_STORAGE_BUCKET}/{encoded}"
+
+    def _ensure_download_token(self, blob) -> str:
+        metadata = dict(blob.metadata or {})
+        token_value = metadata.get("firebaseStorageDownloadTokens")
+        if token_value:
+            return token_value.split(",")[0]
+
+        token_value = uuid4().hex
+        metadata["firebaseStorageDownloadTokens"] = token_value
+        blob.metadata = metadata
+        blob.patch()
+        return token_value
 
     async def upload_file(
         self,
-        bucket_name: str,
-        object_path: str,
+        object_name: str,
         file_data: bytes,
         content_type: str = "application/octet-stream",
+        cache_control: Optional[str] = None,
     ) -> str:
-        """
-        Upload a file to Supabase Storage.
-        
-        Args:
-            bucket_name: Bucket name (e.g., "face-photos")
-            object_path: Path within bucket (e.g., "user_123/photo.jpg")
-            file_data: File content as bytes
-            content_type: MIME type
-            
-        Returns:
-            Full object path in storage
-        """
         try:
-            client = self._ensure_client()
+            bucket = self._ensure_bucket()
             loop = asyncio.get_event_loop()
 
             def _upload() -> str:
-                response = client.storage.from_(bucket_name).upload(
-                    object_path, file_data, {"content-type": content_type}
-                )
-                logger.info(f"Uploaded {object_path} to {bucket_name}")
-                return object_path
+                blob = bucket.blob(object_name)
+                blob.content_type = content_type
+                blob.cache_control = cache_control
+                blob.metadata = {"firebaseStorageDownloadTokens": uuid4().hex}
+                blob.upload_from_string(file_data, content_type=content_type)
+                logger.info(f"Uploaded {object_name} to bucket {settings.FIREBASE_STORAGE_BUCKET}")
+                return object_name
 
-            result = await loop.run_in_executor(None, _upload)
-            return result
+            return await loop.run_in_executor(None, _upload)
         except Exception as e:
-            logger.error(f"Failed to upload {object_path}: {e}")
+            logger.error(f"Failed to upload {object_name}: {e}")
             raise
 
     async def download_file(
         self,
-        bucket_name: str,
-        object_path: str,
+        object_name: str,
         local_path: Optional[str] = None,
     ) -> bytes | str:
-        """
-        Download a file from Supabase Storage.
-        
-        Args:
-            bucket_name: Bucket name
-            object_path: Path within bucket
-            local_path: Optional path to save locally (for processing)
-            
-        Returns:
-            File bytes if local_path is None, else path to downloaded file
-        """
         try:
-            client = self._ensure_client()
+            bucket = self._ensure_bucket()
             loop = asyncio.get_event_loop()
 
             def _download() -> bytes:
-                response = client.storage.from_(bucket_name).download(object_path)
-                return response
+                blob = bucket.blob(object_name)
+                return blob.download_as_bytes()
 
             file_data = await loop.run_in_executor(None, _download)
 
@@ -117,199 +116,95 @@ class StorageService:
                 Path(local_path).parent.mkdir(parents=True, exist_ok=True)
                 with open(local_path, "wb") as f:
                     f.write(file_data)
-                logger.info(f"Downloaded {object_path} to {local_path}")
+                logger.info(f"Downloaded {object_name} to {local_path}")
                 return local_path
+
             return file_data
         except Exception as e:
-            logger.error(f"Failed to download {object_path}: {e}")
+            logger.error(f"Failed to download {object_name}: {e}")
             raise
 
-    async def delete_file(
-        self,
-        bucket_name: str,
-        object_path: str,
-    ) -> None:
-        """Delete a file from Supabase Storage."""
+    async def delete_file(self, object_name: str) -> None:
         try:
-            client = self._ensure_client()
+            bucket = self._ensure_bucket()
             loop = asyncio.get_event_loop()
 
             def _delete() -> None:
-                client.storage.from_(bucket_name).remove([object_path])
-                logger.info(f"Deleted {object_path} from {bucket_name}")
+                bucket.blob(object_name).delete()
+                logger.info(f"Deleted {object_name} from bucket {settings.FIREBASE_STORAGE_BUCKET}")
 
             await loop.run_in_executor(None, _delete)
         except Exception as e:
-            logger.error(f"Failed to delete {object_path}: {e}")
+            logger.error(f"Failed to delete {object_name}: {e}")
             raise
 
-    async def get_public_url(
-        self,
-        bucket_name: str,
-        object_path: str,
-    ) -> str:
-        """Get a public URL for a file (only works if bucket is public)."""
+    async def get_download_url(self, object_name: Optional[str]) -> Optional[str]:
+        if not object_name:
+            return None
+
         try:
-            client = self._ensure_client()
+            bucket = self._ensure_bucket()
             loop = asyncio.get_event_loop()
 
-            def _get_url() -> str:
-                response = client.storage.from_(bucket_name).get_public_url(object_path)
-                return response
+            def _resolve() -> str:
+                blob = bucket.blob(object_name)
+                mode = settings.FIREBASE_STORAGE_URL_MODE.strip().lower()
+                if mode == "public_url":
+                    return self._public_url(object_name)
+                if mode == "signed_url":
+                    return blob.generate_signed_url(
+                        version="v4",
+                        expiration=timedelta(seconds=settings.STORAGE_URL_TTL_SECONDS),
+                        method="GET",
+                    )
 
-            url = await loop.run_in_executor(None, _get_url)
-            return url
+                blob.reload()
+                token = self._ensure_download_token(blob)
+                return self._firebase_download_url(object_name, token)
+
+            return await loop.run_in_executor(None, _resolve)
         except Exception as e:
-            logger.error(f"Failed to get public URL for {object_path}: {e}")
-            raise
+            logger.error(f"Failed to build download URL for {object_name}: {e}")
+            if settings.FIREBASE_STORAGE_URL_MODE.strip().lower() == "public_url":
+                return self._public_url(object_name)
+            return None
 
-    async def get_signed_url(
-        self,
-        bucket_name: str,
-        object_path: str,
-        expires_in_seconds: int = 3600,
-    ) -> str:
-        """
-        Get a signed URL for a private file.
-        
-        Args:
-            bucket_name: Bucket name
-            object_path: Path within bucket
-            expires_in_seconds: How long the URL is valid (default 1 hour)
-            
-        Returns:
-            Signed URL valid for the specified duration
-        """
-        try:
-            client = self._ensure_client()
-            loop = asyncio.get_event_loop()
-
-            def _get_signed_url() -> str:
-                response = client.storage.from_(bucket_name).create_signed_url(
-                    object_path, expires_in_seconds
-                )
-                return response["signedURL"]
-
-            url = await loop.run_in_executor(None, _get_signed_url)
-            return url
-        except Exception as e:
-            logger.error(f"Failed to get signed URL for {object_path}: {e}")
-            raise
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Specialized methods for common patterns
-    # ─────────────────────────────────────────────────────────────────────
-
-    async def upload_face_photo(
-        self,
-        user_id: int,
-        file_data: bytes,
-        filename: str = "photo.jpg",
-    ) -> str:
-        """Upload and return object path for a face photo."""
-        object_path = f"user_{user_id}/{filename}"
-        return await self.upload_file(
-            bucket_name="face-photos",
-            object_path=object_path,
-            file_data=file_data,
-            content_type="image/jpeg",
-        )
-
-    async def upload_voice_sample(
-        self,
-        user_id: int,
-        file_data: bytes,
-        filename: str = "sample.wav",
-    ) -> str:
-        """Upload and return object path for a voice sample."""
-        object_path = f"user_{user_id}/{filename}"
-        return await self.upload_file(
-            bucket_name="voice-samples",
-            object_path=object_path,
-            file_data=file_data,
-            content_type="audio/wav",
-        )
-
-    async def upload_voice_output(
-        self,
-        user_id: int,
-        file_data: bytes,
-        filename: str = "output.wav",
-    ) -> str:
-        """Upload and return object path for generated audio."""
-        object_path = f"user_{user_id}/{filename}"
-        return await self.upload_file(
-            bucket_name="voice-output",
-            object_path=object_path,
-            file_data=file_data,
-            content_type="audio/wav",
-        )
-
-    async def upload_avatar_video(
-        self,
-        user_id: int,
-        file_data: bytes,
-        filename: str = "avatar.mp4",
-    ) -> str:
-        """Upload and return object path for an avatar video."""
-        object_path = f"user_{user_id}/{filename}"
-        return await self.upload_file(
-            bucket_name="avatars",
-            object_path=object_path,
-            file_data=file_data,
-            content_type="video/mp4",
-        )
-
-    async def download_for_processing(
-        self,
-        bucket_name: str,
-        object_path: str,
-    ) -> str:
-        """Download a file to /tmp for processing. Returns local path."""
-        local_path = f"/tmp/{uuid4().hex}_{Path(object_path).name}"
-        await self.download_file(bucket_name, object_path, local_path)
+    async def download_for_processing(self, object_name: str) -> str:
+        local_path = str(Path(tempfile.gettempdir()) / f"{uuid4().hex}_{Path(object_name).name}")
+        await self.download_file(object_name, local_path)
         return local_path
 
-    async def get_voice_sample_url(
-        self,
-        user_id: int,
-        voice_id: str,
-        expires_in_seconds: int = 3600,
-    ) -> str:
-        """Get a signed URL for a voice sample (private bucket)."""
-        object_path = f"user_{user_id}/{voice_id}.wav"
-        return await self.get_signed_url("voice-samples", object_path, expires_in_seconds)
+    async def upload_face_photo(self, user_id: int, file_data: bytes, filename: str = "photo.jpg") -> str:
+        return await self.upload_file(
+            object_name=self._build_object_name(settings.STORAGE_FACE_PREFIX, user_id, filename),
+            file_data=file_data,
+            content_type="image/jpeg",
+            cache_control="private, max-age=3600",
+        )
 
-    async def get_face_photo_url(
-        self,
-        user_id: int,
-        filename: str,
-        expires_in_seconds: int = 3600,
-    ) -> str:
-        """Get a signed URL for a face photo (private bucket)."""
-        object_path = f"user_{user_id}/{filename}"
-        return await self.get_signed_url("face-photos", object_path, expires_in_seconds)
+    async def upload_voice_sample(self, user_id: int, file_data: bytes, filename: str = "sample.wav") -> str:
+        return await self.upload_file(
+            object_name=self._build_object_name(settings.STORAGE_VOICE_SAMPLES_PREFIX, user_id, filename),
+            file_data=file_data,
+            content_type="audio/wav",
+            cache_control="private, max-age=3600",
+        )
 
-    async def get_voice_output_url(
-        self,
-        user_id: int,
-        filename: str,
-        expires_in_seconds: int = 3600,
-    ) -> str:
-        """Get a signed URL for generated voice output."""
-        object_path = f"user_{user_id}/{filename}"
-        return await self.get_signed_url("voice-output", object_path, expires_in_seconds)
+    async def upload_voice_output(self, user_id: int, file_data: bytes, filename: str = "output.wav") -> str:
+        return await self.upload_file(
+            object_name=self._build_object_name(settings.STORAGE_VOICE_OUTPUT_PREFIX, user_id, filename),
+            file_data=file_data,
+            content_type="audio/wav",
+            cache_control="private, max-age=3600",
+        )
 
-    async def get_avatar_url(
-        self,
-        user_id: int,
-        filename: str,
-        expires_in_seconds: int = 3600,
-    ) -> str:
-        """Get a URL for an avatar video (may be public or signed)."""
-        object_path = f"user_{user_id}/{filename}"
-        # For now, use signed URLs; could switch to public after user makes twin public
-        return await self.get_signed_url("avatars", object_path, expires_in_seconds)
+    async def upload_avatar_video(self, user_id: int, file_data: bytes, filename: str = "avatar.mp4") -> str:
+        return await self.upload_file(
+            object_name=self._build_object_name(settings.STORAGE_AVATARS_PREFIX, user_id, filename),
+            file_data=file_data,
+            content_type="video/mp4",
+            cache_control="public, max-age=3600",
+        )
 
 
 storage_service = StorageService()

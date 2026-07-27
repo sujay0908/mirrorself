@@ -16,8 +16,6 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
-from app.core.logging import logger
 from app.core.redis_client import redis_client
 from app.models.fact import Fact
 from app.models.user import User

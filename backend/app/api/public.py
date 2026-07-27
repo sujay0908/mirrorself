@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.schemas.user import UserPublic
+from app.services.response_mapper import map_user_public
 from app.services.chat_service import chat_service
 
 router = APIRouter(prefix="/u", tags=["public"])
@@ -28,7 +29,7 @@ async def get_public_profile(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Twin not found or private")
     if user.twin_status != "ready":
         raise HTTPException(status.HTTP_409_CONFLICT, "This twin is still being generated.")
-    return UserPublic.model_validate(user)
+    return await map_user_public(user)
 
 
 @router.post("/{username}/chat", response_model=ChatResponse)

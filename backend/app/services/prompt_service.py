@@ -4,7 +4,7 @@ messages, and the requested response tone into a single system prompt.
 """
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from typing import Iterable
 
 
 TONE_INSTRUCTIONS = {

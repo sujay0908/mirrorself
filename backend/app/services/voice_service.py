@@ -9,7 +9,6 @@ rest of the app can run.
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 import uuid
 from pathlib import Path

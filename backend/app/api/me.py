@@ -12,6 +12,7 @@ from app.models.fact import Fact
 from app.models.user import User
 from app.schemas.chat import ConversationDetail, ConversationSummary
 from app.schemas.user import UserPrivate, UserUpdate
+from app.services.response_mapper import map_message, map_user_private
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -32,7 +33,7 @@ async def update_me(
         current_user.personality = payload.personality.model_dump()
     await db.commit()
     await db.refresh(current_user)
-    return UserPrivate.model_validate(current_user)
+    return await map_user_private(current_user)
 
 
 @router.get("/conversations", response_model=list[ConversationSummary])
@@ -89,7 +90,7 @@ async def get_conversation(
         title=conv.title,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
-        messages=msgs,
+        messages=[await map_message(msg) for msg in msgs],
     )
 
 
