@@ -1,6 +1,7 @@
 # IMMEDIATE ACTION ITEMS - Follow in Order
 
 ## 📌 Current Status
+
 ✅ Firebase Project: mirrorself-d6f1b (configured)
 ✅ Google Cloud Project: project-14346235-d9f7-4d14-b72 (ready)
 ✅ Supabase Credentials: Collected
@@ -17,6 +18,7 @@
 **STOP here and install gcloud CLI first.**
 
 Option A (Recommended - Automatic):
+
 ```powershell
 # Copy and paste this entire block into PowerShell (as administrator):
 $ProgressPreference = 'SilentlyContinue'
@@ -25,12 +27,14 @@ $ProgressPreference = 'SilentlyContinue'
 ```
 
 Option B (Manual):
+
 1. Go to https://cloud.google.com/sdk/docs/install
 2. Download `GoogleCloudSDKInstaller.exe`
 3. Run the installer
 4. Accept defaults, click "Next" through the wizard
 
 **After install, restart PowerShell and verify:**
+
 ```powershell
 gcloud --version
 gcloud auth login
@@ -52,6 +56,7 @@ gcloud config list
 ```
 
 Expected output:
+
 ```
 [core]
 project = project-14346235-d9f7-4d14-b72
@@ -66,7 +71,7 @@ Go to: https://app.supabase.com → Your Project → Storage
 **Create 4 buckets:**
 
 1. **New bucket** button → `face-photos` → Private
-2. **New bucket** button → `voice-samples` → Private  
+2. **New bucket** button → `voice-samples` → Private
 3. **New bucket** button → `voice-output` → Private
 4. **New bucket** button → `avatars` → Public
 
@@ -82,17 +87,15 @@ Go to: https://app.supabase.com → Your Project → Storage
 # Format: postgresql://postgres:PASSWORD@aws-region.supabase.co:5432/postgres
 
 # Set environment variable (replace with your actual connection)
-$env:DATABASE_URL = "postgresql://postgres:YOUR_PASSWORD@aws-region.supabase.co:5432/postgres"
-$env:DATABASE_URL = 'postgresql://postgres:Sujaygodugu@0908@db.ihygwqrqkvkwlpzjrhdg.supabase.co:5432/postgres'
-$env:DATABASE_URL="postgresql+asyncpg://postgres:Sujaygodugu@0908@db.ihygwqrqkvkwlpzjrhdg.supabase.co:5432/postgres"
 
-db.ihygwqrqkvkwlpzjrhdg.supabase.co
+
 # Run migration
 cd c:\Users\sujay\Downloads\mirror-self-ai\mirrorself\backend
 python -m alembic upgrade head
 ```
 
 **Expected output:**
+
 ```
 INFO [alembic.runtime.migration] Running upgrade 0001_initial -> 0002_supabase_auth
 INFO [alembic.runtime.migration] Done.
@@ -121,6 +124,7 @@ cd c:\Users\sujay\Downloads\mirror-self-ai\mirrorself
 ```
 
 **Expected output:**
+
 ```
 Created/Updated: 7
 Failed: 0
@@ -139,12 +143,13 @@ cd c:\Users\sujay\Downloads\mirror-self-ai\mirrorself
 
 # This will:
 # - Build Docker image
-# - Push to Google Container Registry  
+# - Push to Google Container Registry
 # - Deploy to Cloud Run
 # - Verify health check
 ```
 
 **Expected output:**
+
 ```
 🚀 Deploying MirrorSelf Backend to Cloud Run
 ✅ Build complete
@@ -185,6 +190,7 @@ firebase deploy
 ```
 
 **Expected output:**
+
 ```
 ✔ Deploy complete!
 ✔ Hosting URL: https://mirrorself-d6f1b.web.app
@@ -195,6 +201,7 @@ firebase deploy
 ### Action 9: Verify Everything Works (5 minutes)
 
 **Test backend health:**
+
 ```powershell
 $BACKEND = "https://mirrorself-api-xxxxx.run.app"
 curl "$BACKEND/health"
@@ -202,11 +209,13 @@ curl "$BACKEND/health/ready"
 ```
 
 **Test frontend:**
+
 ```powershell
 start "https://mirrorself-d6f1b.web.app"
 ```
 
 **In your browser:**
+
 1. Go to login page
 2. Create new account (sign up)
 3. Complete onboarding (upload face photo, voice)
@@ -216,18 +225,18 @@ start "https://mirrorself-d6f1b.web.app"
 
 ## ⏱️ Timeline
 
-| Step | Time | Status |
-|------|------|--------|
-| Install gcloud | 10 min | ⏳ NOW |
-| Authenticate | 5 min | Next |
-| Create Supabase buckets | 5 min | Next |
-| Run migration | 5 min | Next |
-| Create secrets | 10 min | Next |
-| Deploy backend | 15 min | Next |
-| Update frontend | 2 min | Next |
-| Deploy frontend | 5 min | Next |
-| Verify | 5 min | Final |
-| **TOTAL** | **~60 min** | Go! |
+| Step                    | Time        | Status |
+| ----------------------- | ----------- | ------ |
+| Install gcloud          | 10 min      | ⏳ NOW |
+| Authenticate            | 5 min       | Next   |
+| Create Supabase buckets | 5 min       | Next   |
+| Run migration           | 5 min       | Next   |
+| Create secrets          | 10 min      | Next   |
+| Deploy backend          | 15 min      | Next   |
+| Update frontend         | 2 min       | Next   |
+| Deploy frontend         | 5 min       | Next   |
+| Verify                  | 5 min       | Final  |
+| **TOTAL**               | **~60 min** | Go!    |
 
 ---
 
@@ -243,18 +252,23 @@ start "https://mirrorself-d6f1b.web.app"
 ## 🆘 Common Issues
 
 ### "gcloud: command not found"
+
 → Install Google Cloud SDK (Option A above), restart PowerShell
 
 ### "Docker build failed"
+
 → Make sure Docker Desktop is running: `docker ps`
 
 ### "Permission denied" on secrets
+
 → Run: `gcloud auth configure-docker --quiet`
 
 ### "Health check failed"
+
 → Wait 30 seconds for Cloud Run to initialize, try again
 
 ### "Connection refused" on database
+
 → Use direct connection string (not pooler), verify Supabase project is running
 
 ---

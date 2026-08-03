@@ -19,7 +19,6 @@ aiofiles==24.1.0
 pillow==11.0.0
 opencv-python-headless==4.10.0.84
 numpy==1.26.4
-TTS==0.22.0
 torch==2.4.1
 torchaudio==2.4.1
 safetensors==0.4.5
