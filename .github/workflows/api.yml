@@ -38,5 +38,5 @@ jobs:
           APP_ENV: test
           LLM_PROVIDER: mock
           LLM_MODEL: mock-echo
-          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
         run: pytest -q
