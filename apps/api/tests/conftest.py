@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from typing import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
 
 # Set test env BEFORE any app imports so `Settings()` is constructed with them.
 os.environ.setdefault("APP_ENV", "test")
@@ -31,14 +31,14 @@ from app.api.deps import (
 )
 from app.auth.models import AuthenticatedUser
 from app.config import reset_settings_cache
+from app.conversation import models as _conv_models  # noqa: F401
 from app.db.base import Base
 from app.llm.registry import reset_provider_cache
 from app.main import create_app
+from app.memory import models as _mem_models  # noqa: F401
 
 # Import ORM models so they are attached to Base.metadata.
 from app.twin import models as _twin_models  # noqa: F401
-from app.conversation import models as _conv_models  # noqa: F401
-from app.memory import models as _mem_models  # noqa: F401
 
 
 @pytest.fixture

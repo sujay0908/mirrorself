@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.conversation.models import Message
 from app.llm.interface import LLMProvider
@@ -29,7 +29,7 @@ logger = get_logger(__name__)
 
 async def extract_memory_candidates_task(
     *,
-    sessionmaker: async_sessionmaker,
+    sessionmaker: async_sessionmaker[AsyncSession],
     llm_provider: LLMProvider,
     llm_model: str,
     user_id: uuid.UUID,

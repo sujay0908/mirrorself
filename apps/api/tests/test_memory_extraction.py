@@ -12,8 +12,8 @@ Also pins two hard invariants:
 
 from __future__ import annotations
 
-import structlog
 import pytest
+import structlog
 from sqlalchemy import select
 
 from app.api.deps import extraction_llm_provider_dep, get_llm_provider
@@ -23,7 +23,6 @@ from app.memory.extractor import MemoryExtractor
 from app.memory.models import MemoryCandidate
 from app.twin.models import TwinProfile
 from tests._helpers import FixtureExtractionProvider
-
 
 # ---------- Extractor as a pure function ----------
 

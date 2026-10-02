@@ -6,7 +6,8 @@ against `app.dependency_overrides`.
 
 from __future__ import annotations
 
-from typing import Annotated, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -29,12 +30,12 @@ async def db_session_dep() -> AsyncIterator[AsyncSession]:
         yield s
 
 
-def sessionmaker_dep() -> async_sessionmaker:
+def sessionmaker_dep() -> async_sessionmaker[AsyncSession]:
     return get_sessionmaker()
 
 
 DBSession = Annotated[AsyncSession, Depends(db_session_dep)]
-SessionmakerDep = Annotated[async_sessionmaker, Depends(sessionmaker_dep)]
+SessionmakerDep = Annotated[async_sessionmaker[AsyncSession], Depends(sessionmaker_dep)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 LLMProviderDep = Annotated[LLMProvider, Depends(get_llm_provider)]
 EmbeddingProviderDep = Annotated[EmbeddingProvider, Depends(get_embedding_provider)]

@@ -45,7 +45,7 @@ class ConversationService:
         session: AsyncSession,
         provider: LLMProvider,
         *,
-        sessionmaker: async_sessionmaker | None = None,
+        sessionmaker: async_sessionmaker[AsyncSession] | None = None,
         llm_model: str | None = None,
         task_runner: TaskRunner | None = None,
         extraction_provider: LLMProvider | None = None,

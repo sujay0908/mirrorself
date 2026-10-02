@@ -10,11 +10,9 @@ from sqlalchemy import select
 from app.api.deps import (
     get_current_user,
     get_embedding_provider,
-    memory_service_dep,
     sessionmaker_dep,
-    twin_service_dep,
 )
-from app.memory.models import Memory, MemoryCandidate, MemoryEmbedding, MemorySource
+from app.memory.models import Memory, MemoryEmbedding, MemorySource
 from app.memory.schemas import MemoryCandidateDraft
 from app.memory.service import MemoryService
 from app.twin.service import TwinService

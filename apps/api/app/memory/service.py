@@ -17,9 +17,9 @@ Rules:
 
 from __future__ import annotations
 
+import contextlib
 import uuid
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -204,7 +204,7 @@ class MemoryService:
                 },
             )
 
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         memory = Memory(
             user_id=twin.user_id,
             twin_id=twin.id,
@@ -317,10 +317,8 @@ class MemoryService:
         try:
             await self._session.commit()
         except Exception as exc:  # pragma: no cover
-            try:
+            with contextlib.suppress(Exception):
                 await self._session.rollback()
-            except Exception:
-                pass
             logger.warning(
                 "memory.embedding.commit_failed",
                 memory_id=str(memory.id),

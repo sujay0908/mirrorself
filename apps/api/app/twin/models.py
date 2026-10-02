@@ -9,7 +9,7 @@ originating from memory pass through a confirmation loop (Sprint 2+).
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, ForeignKey, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -28,12 +28,12 @@ class Twin(Base, UUIDPKMixin, TimestampMixin):
     )
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
 
-    profile: Mapped["TwinProfile"] = relationship(
+    profile: Mapped[TwinProfile] = relationship(
         back_populates="twin",
         uselist=False,
         cascade="all, delete-orphan",
     )
-    conversations: Mapped[list["Conversation"]] = relationship(
+    conversations: Mapped[list[Conversation]] = relationship(
         back_populates="twin",
         cascade="all, delete-orphan",
     )
@@ -53,6 +53,8 @@ class TwinProfile(Base, UUIDPKMixin, TimestampMixin):
         String(32), nullable=False, default="neutral"
     )
     communication_style_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    basic_profile: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    basic_profile: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
 
     twin: Mapped[Twin] = relationship(back_populates="profile")

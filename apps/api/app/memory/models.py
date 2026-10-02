@@ -20,8 +20,8 @@ Rules enforced here (and reinforced by tests):
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     JSON,
@@ -39,7 +39,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.common.ids import new_id
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
 
 if TYPE_CHECKING:
@@ -53,7 +52,7 @@ CANDIDATE_STATUSES: tuple[str, ...] = ("pending", "confirmed", "rejected", "expi
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 class Memory(Base, UUIDPKMixin, TimestampMixin):
@@ -93,13 +92,15 @@ class Memory(Base, UUIDPKMixin, TimestampMixin):
     last_confirmed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
 
-    sources: Mapped[list["MemorySource"]] = relationship(
+    sources: Mapped[list[MemorySource]] = relationship(
         back_populates="memory",
         cascade="all, delete-orphan",
     )
-    embeddings: Mapped[list["MemoryEmbedding"]] = relationship(
+    embeddings: Mapped[list[MemoryEmbedding]] = relationship(
         back_populates="memory",
         cascade="all, delete-orphan",
     )
@@ -133,7 +134,9 @@ class MemorySource(Base, UUIDPKMixin):
         ForeignKey("conversations.id", ondelete="SET NULL"),
         nullable=True,
     )
-    source_metadata: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    source_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

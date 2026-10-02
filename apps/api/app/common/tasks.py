@@ -11,9 +11,9 @@ Future sprints that need cross-process durability (Redis + arq) swap
 
 from __future__ import annotations
 
-import asyncio
 import inspect
-from typing import Any, Awaitable, Callable, ClassVar, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from fastapi import BackgroundTasks
 

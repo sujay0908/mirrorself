@@ -46,7 +46,7 @@ class MockEmbeddingProvider(EmbeddingProvider):
         """
         out: list[float] = []
         counter = 0
-        seed = f"{model}:{text}".encode("utf-8")
+        seed = f"{model}:{text}".encode()
         while len(out) < self._dimensions:
             h = hashlib.sha256(seed + counter.to_bytes(4, "big")).digest()
             # 8 x 4-byte chunks per digest.

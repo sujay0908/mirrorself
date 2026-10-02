@@ -35,7 +35,7 @@ def _fetch_jwks(url: str) -> dict[str, Any]:
 
 def _decode_hs(token: str, settings: Settings) -> dict[str, Any]:
     assert settings.supabase_jwt_hs_secret is not None
-    return jwt.decode(  # type: ignore[no-any-return]
+    return jwt.decode(
         token,
         settings.supabase_jwt_hs_secret,
         algorithms=["HS256"],
@@ -54,7 +54,7 @@ def _decode_rs(token: str, settings: Settings) -> dict[str, Any]:
     )
     if key is None:
         raise UnauthorizedError("Unknown token key.", code="unauthorized")
-    return jwt.decode(  # type: ignore[no-any-return]
+    return jwt.decode(
         token,
         key,
         algorithms=[key.get("alg", "RS256")],

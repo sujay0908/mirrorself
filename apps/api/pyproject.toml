@@ -2,7 +2,10 @@
 name = "personal-ai-twin-api"
 version = "0.1.0"
 description = "Personal AI Twin — FastAPI backend"
-readme = "../../README.md"
+# `readme` intentionally omitted: modern setuptools refuses paths outside the
+# project directory (apps/api/), so the repo-root README.md cannot be used
+# here. See docs/architecture/system-overview.md for the authoritative repo
+# layout; the top-level README is the entry point for humans.
 requires-python = ">=3.11"
 authors = [{ name = "Personal AI Twin" }]
 license = { text = "TBD" }
@@ -30,6 +33,7 @@ dev = [
     "aiosqlite>=0.20",
     "ruff>=0.6",
     "mypy>=1.11",
+    "types-python-jose>=3.3",
 ]
 
 [tool.pytest.ini_options]

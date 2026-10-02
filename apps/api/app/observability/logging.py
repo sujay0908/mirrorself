@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any
+from typing import Any, cast
 
 import structlog
 
@@ -45,4 +45,4 @@ def get_logger(name: str | None = None, **initial: Any) -> structlog.stdlib.Boun
     logger = structlog.get_logger(name)
     if initial:
         logger = logger.bind(**initial)
-    return logger
+    return cast("structlog.stdlib.BoundLogger", logger)

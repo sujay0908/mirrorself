@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
-from app.memory.models import Memory, MemoryCandidate, MemoryEmbedding, MemorySource
+from app.memory.models import Memory, MemoryEmbedding, MemorySource
 
 
 async def _seed_candidate_and_confirm(
@@ -21,9 +21,7 @@ async def _seed_candidate_and_confirm(
     app = transport.app
     from app.api.deps import (
         get_current_user,
-        memory_service_dep,
         sessionmaker_dep,
-        twin_service_dep,
     )
     from app.llm.providers.mock_embedding import MockEmbeddingProvider
     from app.memory.schemas import MemoryCandidateDraft
@@ -32,8 +30,8 @@ async def _seed_candidate_and_confirm(
     user = (await user()) if callable(user) else user
     sessionmaker = app.dependency_overrides[sessionmaker_dep]()
     async with sessionmaker() as session:
-        from app.twin.service import TwinService
         from app.memory.service import MemoryService
+        from app.twin.service import TwinService
 
         twin_service = TwinService(session)
         twin = await twin_service.require_by_user(user.user_id)

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, JSON, String, Text, Uuid
+from sqlalchemy import JSON, CheckConstraint, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
@@ -25,8 +25,8 @@ class Conversation(Base, UUIDPKMixin, TimestampMixin):
     )
     title: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
-    twin: Mapped["Twin"] = relationship(back_populates="conversations")
-    messages: Mapped[list["Message"]] = relationship(
+    twin: Mapped[Twin] = relationship(back_populates="conversations")
+    messages: Mapped[list[Message]] = relationship(
         back_populates="conversation",
         cascade="all, delete-orphan",
         order_by="Message.created_at",
@@ -54,6 +54,8 @@ class Message(Base, UUIDPKMixin, TimestampMixin):
     llm_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
