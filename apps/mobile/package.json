@@ -1,0 +1,40 @@
+{
+  "name": "@pat/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'TODO: expo lint' && exit 0",
+    "test": "jest --passWithNoTests"
+  },
+  "dependencies": {
+    "@pat/shared-types": "workspace:*",
+    "@supabase/supabase-js": "^2.45.0",
+    "expo": "~51.0.28",
+    "expo-constants": "~16.0.2",
+    "expo-linking": "~6.3.1",
+    "expo-router": "~3.5.23",
+    "expo-secure-store": "~13.0.2",
+    "expo-status-bar": "~1.12.1",
+    "react": "18.2.0",
+    "react-native": "0.74.5",
+    "react-native-gesture-handler": "~2.16.1",
+    "react-native-reanimated": "~3.10.1",
+    "react-native-safe-area-context": "4.10.5",
+    "react-native-screens": "3.31.1",
+    "react-native-url-polyfill": "^2.0.0",
+    "zustand": "^4.5.4"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@types/react": "~18.2.79",
+    "jest": "^29.7.0",
+    "jest-expo": "~51.0.3",
+    "typescript": "~5.3.3"
+  }
+}

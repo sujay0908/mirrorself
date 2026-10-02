@@ -1,0 +1,10 @@
+{
+  "name": "@pat/prompt-templates",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "typecheck": "echo 'no-op (yaml only)'",
+    "lint": "echo 'no-op (yaml only)'",
+    "test": "echo 'no-op (yaml only)'"
+  }
+}

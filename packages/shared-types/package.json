@@ -1,0 +1,15 @@
+{
+  "name": "@pat/shared-types",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "generate": "echo 'TODO: openapi-typescript --input ../../apps/api/openapi.json --output src/generated.ts'"
+  },
+  "devDependencies": {
+    "typescript": "~5.3.3"
+  }
+}

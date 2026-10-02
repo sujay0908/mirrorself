@@ -1,0 +1,17 @@
+{
+  "name": "personal-ai-twin",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Personal AI Twin monorepo — the avatar is the interface; the evolving personal intelligence is the product.",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --parallel typecheck",
+    "lint": "pnpm -r --parallel lint",
+    "test": "pnpm -r --parallel test",
+    "mobile": "pnpm --filter @pat/mobile",
+    "shared": "pnpm --filter @pat/shared-types"
+  }
+}

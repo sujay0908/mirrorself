@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Personal AI Twin",
+    "slug": "personal-ai-twin",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "pat",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "ai.personaltwin.app"
+    },
+    "android": {
+      "package": "ai.personaltwin.app"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

@@ -1,0 +1,25 @@
+name: contract-drift
+
+on:
+  push:
+    paths:
+      - "apps/api/app/**/schemas.py"
+      - "packages/shared-types/**"
+  pull_request:
+    paths:
+      - "apps/api/app/**/schemas.py"
+      - "packages/shared-types/**"
+
+# Sprint 1 keeps @pat/shared-types hand-authored. In Sprint 2 this job wires
+# `openapi-typescript` to compare generated output against the committed
+# `packages/shared-types/src/index.ts`.
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder
+        run: |
+          echo "Contract-drift check is a Sprint 2 wiring — see"
+          echo "packages/shared-types/README.md."
