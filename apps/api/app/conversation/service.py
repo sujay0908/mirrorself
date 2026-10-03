@@ -4,14 +4,18 @@ Ownership rule: every read and write scopes by the calling user's Twin. A
 client cannot read another user's conversation even by guessing an id — the
 join to `twins.user_id` returns nothing and we surface a plain 404.
 
-Sprint 2 addition: after persisting a (user, twin) turn pair, enqueue a
-background task that extracts memory candidates. The task:
-- opens its own DB session (does not share this request's session),
-- never raises back into the caller,
-- never writes to `TwinProfile`.
+Sprint 2 added background memory candidate extraction after each turn.
+Sprint 3 adds memory retrieval BEFORE each turn: the service asks the
+retriever for relevant confirmed memories, hands the ranked result to the
+context builder, and passes a populated `TwinContext` to the pipeline.
 
-The chat response is returned to the user BEFORE the extraction task
-runs; a slow or failing extractor cannot slow or fail chat.
+Two hard invariants (Sprint 3 architectural rules F + E):
+
+- Memory retrieval failure MUST NOT fail the chat response. The service
+  catches any exception from the retriever, logs it with IDs, and falls
+  back to an empty-memory context so the Twin can still respond.
+- Memory extraction failure MUST NOT fail the chat response (preserved
+  from Sprint 2 — the background task is already isolated).
 """
 
 from __future__ import annotations
@@ -28,6 +32,8 @@ from app.conversation.models import Conversation, Message
 from app.conversation.pipeline import run_pipeline
 from app.conversation.schemas import ConversationCreateIn
 from app.llm.interface import LLMProvider
+from app.memory.context import ContextBuilder, TwinContext
+from app.memory.retrieval import MemoryRetriever, RetrievalResult
 from app.memory.tasks import extract_memory_candidates_task
 from app.observability.logging import get_logger
 from app.twin.models import Twin
@@ -49,15 +55,17 @@ class ConversationService:
         llm_model: str | None = None,
         task_runner: TaskRunner | None = None,
         extraction_provider: LLMProvider | None = None,
+        retriever: MemoryRetriever | None = None,
+        context_builder: ContextBuilder | None = None,
     ) -> None:
         self._session = session
         self._provider = provider
         self._sessionmaker = sessionmaker
         self._llm_model = llm_model
         self._task_runner = task_runner
-        # Falls back to the chat provider only when extraction_provider is
-        # not wired at all (stripped unit test). Production injects both.
         self._extraction_provider = extraction_provider or provider
+        self._retriever = retriever
+        self._context_builder = context_builder or ContextBuilder()
 
     async def list_for_twin(self, twin: Twin) -> list[Conversation]:
         stmt = (
@@ -97,7 +105,9 @@ class ConversationService:
         )
         return conv
 
-    async def list_messages(self, twin: Twin, conversation_id: uuid.UUID) -> list[Message]:
+    async def list_messages(
+        self, twin: Twin, conversation_id: uuid.UUID
+    ) -> list[Message]:
         conv = await self.get(twin, conversation_id)
         return list(conv.messages)
 
@@ -107,11 +117,12 @@ class ConversationService:
         conversation_id: uuid.UUID,
         content: str,
     ) -> tuple[Message, Message]:
-        """Persist the user turn, run the pipeline, persist the twin turn.
+        """Persist the user turn, retrieve relevant memory, run the pipeline,
+        persist the twin turn, enqueue extraction.
 
-        After persistence commits, enqueues memory extraction. Enqueueing is
-        best-effort: if no `TaskRunner` was wired (unlikely in production,
-        possible in a stripped unit test), extraction is simply skipped.
+        Retrieval and extraction are both best-effort. A failing retriever
+        yields an empty-memory context (chat still works). A failing
+        extractor is handled in the background task.
         """
         conv = await self.get(twin, conversation_id)
 
@@ -124,13 +135,21 @@ class ConversationService:
         await self._session.flush()
         await self._session.refresh(user_msg)
 
-        # History excludes the just-added user_msg — appended inside the
-        # pipeline so the shape stays provider-agnostic.
         history = [m for m in conv.messages if m.id != user_msg.id]
-        response = await run_pipeline(
+
+        retrieval = await self._retrieve_safely(
             twin=twin,
-            conversation=conv,
-            history=history,
+            query_text=content,
+            conversation_id=conv.id,
+        )
+        twin_context: TwinContext = self._context_builder.build(
+            twin=twin,
+            retrieved=retrieval.items,
+            recent_messages=history,
+        )
+
+        response = await run_pipeline(
+            context=twin_context,
             user_message_content=content,
             provider=self._provider,
         )
@@ -143,7 +162,15 @@ class ConversationService:
             llm_model=response.model,
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
-            metadata_json={"finish_reason": response.finish_reason},
+            metadata_json={
+                "finish_reason": response.finish_reason,
+                "retrieval": {
+                    "ok": retrieval.ok,
+                    "error": retrieval.error,
+                    "memories_returned": len(retrieval.items),
+                    "memory_ids": [str(r.memory.id) for r in retrieval.items],
+                },
+            },
         )
         self._session.add(twin_msg)
         await self._session.commit()
@@ -160,9 +187,10 @@ class ConversationService:
             model=response.model,
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
+            retrieval_ok=retrieval.ok,
+            memories_used=len(retrieval.items),
         )
 
-        # Sprint 2 hook: extract memory candidates in the background.
         self._enqueue_memory_extraction(
             twin=twin,
             conversation_id=conv.id,
@@ -171,6 +199,55 @@ class ConversationService:
         )
 
         return user_msg, twin_msg
+
+    async def _retrieve_safely(
+        self,
+        *,
+        twin: Twin,
+        query_text: str,
+        conversation_id: uuid.UUID,
+    ) -> RetrievalResult:
+        """Call the retriever and absorb any failure.
+
+        The retriever ITSELF never raises (it catches internally and sets
+        `error`). This method adds a second belt-and-braces try/except in
+        case a future contributor accidentally changes that invariant.
+        """
+        if self._retriever is None:
+            logger.info(
+                "memory.retrieval.skipped",
+                reason="retriever_not_wired",
+                conversation_id=str(conversation_id),
+                twin_id=str(twin.id),
+            )
+            return RetrievalResult(
+                metadata={"skipped": True, "reason": "retriever_not_wired"}
+            )
+        try:
+            result = await self._retriever.retrieve(twin, query_text)
+        except Exception as exc:
+            logger.warning(
+                "memory.retrieval.unhandled",
+                error=type(exc).__name__,
+                conversation_id=str(conversation_id),
+                twin_id=str(twin.id),
+            )
+            return RetrievalResult(
+                error=f"unhandled:{type(exc).__name__}",
+                metadata={
+                    "conversation_id": str(conversation_id),
+                    "twin_id": str(twin.id),
+                },
+            )
+        if result.error:
+            logger.warning(
+                "memory.retrieval.failed",
+                reason=result.error,
+                conversation_id=str(conversation_id),
+                twin_id=str(twin.id),
+                metadata=result.metadata,
+            )
+        return result
 
     def _enqueue_memory_extraction(
         self,
