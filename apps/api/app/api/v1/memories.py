@@ -18,6 +18,8 @@ from app.memory.schemas import (
     MemoryListOut,
     MemoryOut,
     MemoryPatch,
+    MemoryProvenanceOut,
+    MemoryProvenanceSourceOut,
 )
 
 memories_router = APIRouter()
@@ -80,6 +82,40 @@ async def delete_memory(
 ) -> None:
     twin = await twins.require_by_user(user.user_id)
     await memories.delete(twin, memory_id)
+
+
+@memories_router.get("/{memory_id}/provenance", response_model=MemoryProvenanceOut)
+async def get_memory_provenance(
+    memory_id: uuid.UUID,
+    user: CurrentUser,
+    twins: TwinServiceDep,
+    memories: MemoryServiceDep,
+) -> MemoryProvenanceOut:
+    """Answer "why does my Twin know this?" (Sprint 4).
+
+    Returns each source row for the memory, including a bounded
+    (≤240 char) sanitized snippet of the originating message content.
+    The full message remains reachable via `/v1/conversations/{id}/messages`.
+    Owner-scoped: a wrong-owner memory id yields 404, not 403, to avoid
+    leaking existence.
+    """
+    twin = await twins.require_by_user(user.user_id)
+    memory, source_rows = await memories.get_provenance(twin, memory_id)
+    return MemoryProvenanceOut(
+        memory_id=memory.id,
+        sources=[
+            MemoryProvenanceSourceOut(
+                source_id=src.id,
+                source_type=src.source_type,
+                source_message_id=src.source_message_id,
+                source_conversation_id=src.source_conversation_id,
+                created_at=src.created_at,
+                source_snippet=snippet,
+                source_snippet_truncated=truncated,
+            )
+            for src, snippet, truncated in source_rows
+        ],
+    )
 
 
 # ---------- Memory candidates ----------

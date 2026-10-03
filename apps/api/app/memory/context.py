@@ -6,6 +6,7 @@ turns:
 - the Twin's stable profile
 - the (ranked) retrieved memories
 - the recent conversation history
+- the Twin's active goals (Sprint 4, DF7+DF8)
 
 into a `TwinContext` object which the pipeline turns into the LLM message
 sequence. It is unit-testable without ever calling an LLM.
@@ -18,22 +19,29 @@ Design rules enforced here:
 - Memory content inside the prompt is wrapped in `<confirmed_memory>` tags
   with a short attribution header `id=<short>` so the model (and audit
   logs) can tell what came from memory and what was conversational.
-- Hard bounds: at most ``max_memories`` memory items, at most
-  ``max_history_turns`` conversation turns. Both default to small numbers.
+- Active goals are a SEPARATE channel. They are passed in pre-ordered (by
+  priority then recency) and rendered under their own `<active_goal>` tags
+  so the model never confuses an aspirational commitment with a filed fact.
+  Only `active` goals ever reach the prompt (DF7).
+- Hard bounds: at most ``max_memories`` memory items, ``max_active_goals``
+  goals, ``max_history_turns`` conversation turns.
 - Deterministic ordering: memories by descending retrieval score, with
-  memory_id as a stable tiebreaker (already done by the ranker);
-  conversation turns in chronological order.
+  memory_id as a stable tiebreaker (already done by the ranker); goals
+  as provided (service layer orders them); conversation turns in
+  chronological order.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from app.memory.retrieval import RetrievedMemory
 
 if TYPE_CHECKING:
     from app.conversation.models import Message
+    from app.goal.models import Goal
     from app.twin.models import Twin
 
 
@@ -53,6 +61,16 @@ class ContextMemoryEntry:
 
 
 @dataclass(slots=True)
+class ContextGoalEntry:
+    short_id: str
+    goal_id: str
+    title: str
+    description: str | None
+    priority: int
+    target_date: datetime | None
+
+
+@dataclass(slots=True)
 class ContextTurn:
     role: str  # "user" | "twin"
     content: str
@@ -65,10 +83,13 @@ class TwinContext:
     communication_style_notes: str | None
     basic_profile: dict[str, object]
     memories: list[ContextMemoryEntry] = field(default_factory=list)
+    active_goals: list[ContextGoalEntry] = field(default_factory=list)
     recent_turns: list[ContextTurn] = field(default_factory=list)
     # provenance_map: short_id → full memory_id. Not sent to the LLM.
     # Used by the trace/debug layer to answer "why does my Twin know this?"
     provenance_map: dict[str, str] = field(default_factory=dict)
+    # goal_provenance_map: short_id → full goal_id. Not sent to the LLM.
+    goal_provenance_map: dict[str, str] = field(default_factory=dict)
 
     def to_system_prompt(self) -> str:
         """Deterministic, structured system prompt for the LLM."""
@@ -90,6 +111,29 @@ class TwinContext:
                 f"{k}={v!r}" for k, v in sorted(self.basic_profile.items())
             )
             lines.append(f"Basic profile the user shared: {parts}")
+
+        if self.active_goals:
+            lines.append("")
+            lines.append(
+                "The user's CURRENTLY ACTIVE GOALS (highest priority first) "
+                "are listed below. Keep them in mind when the user's message "
+                "touches progress, planning, or trade-offs. Do not quote the "
+                "internal identifiers, and do not fabricate progress."
+            )
+            for g in self.active_goals:
+                target = (
+                    g.target_date.date().isoformat()
+                    if g.target_date is not None
+                    else "none"
+                )
+                desc = (g.description or "").strip()
+                body = g.title.strip()
+                if desc:
+                    body = f"{body}\n{desc}"
+                lines.append(
+                    f"<active_goal id={g.short_id} priority={g.priority} "
+                    f"target_date={target}>\n{body}\n</active_goal>"
+                )
 
         if self.memories:
             lines.append("")
@@ -115,6 +159,11 @@ class ContextBudget:
     max_history_turns: int = 6
     max_memory_content_chars: int = 500
     max_turn_content_chars: int = 1500
+    # DF8: at most 3 active goals carried into the prompt. Service layer
+    # orders them so this is a straight slice.
+    max_active_goals: int = 3
+    max_goal_title_chars: int = 200
+    max_goal_description_chars: int = 500
 
 
 _DEFAULT_BUDGET = ContextBudget()
@@ -129,6 +178,7 @@ class ContextBuilder:
         twin: Twin,
         retrieved: list[RetrievedMemory],
         recent_messages: list[Message],
+        active_goals: list[Goal] | None = None,
     ) -> TwinContext:
         memories: list[ContextMemoryEntry] = []
         provenance: dict[str, str] = {}
@@ -150,6 +200,38 @@ class ContextBuilder:
             )
             provenance[short] = full_id
 
+        # Active goals (DF7+DF8). The caller is responsible for the order and
+        # the status filter; the builder enforces the hard cap and the per-
+        # field truncation. An empty list is the common path — no retrieval
+        # ever gates chat on goals.
+        goal_entries: list[ContextGoalEntry] = []
+        goal_provenance: dict[str, str] = {}
+        for goal in (active_goals or [])[: self._budget.max_active_goals]:
+            full_id = str(goal.id)
+            short = _short_id(full_id)
+            title = goal.title
+            if len(title) > self._budget.max_goal_title_chars:
+                title = title[: self._budget.max_goal_title_chars] + "…"
+            description = goal.description
+            if (
+                description is not None
+                and len(description) > self._budget.max_goal_description_chars
+            ):
+                description = (
+                    description[: self._budget.max_goal_description_chars] + "…"
+                )
+            goal_entries.append(
+                ContextGoalEntry(
+                    short_id=short,
+                    goal_id=full_id,
+                    title=title,
+                    description=description,
+                    priority=goal.priority,
+                    target_date=goal.target_date,
+                )
+            )
+            goal_provenance[short] = full_id
+
         # Recent turns in chronological order, bounded, excluding system
         # messages which are already synthesised by the system prompt.
         bounded_messages = [
@@ -169,6 +251,8 @@ class ContextBuilder:
             communication_style_notes=profile.communication_style_notes,
             basic_profile=dict(profile.basic_profile or {}),
             memories=memories,
+            active_goals=goal_entries,
             recent_turns=turns,
             provenance_map=provenance,
+            goal_provenance_map=goal_provenance,
         )

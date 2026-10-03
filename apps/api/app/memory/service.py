@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.conversation.models import Message
 from app.llm.interface import EmbeddingProvider, EmbeddingRequest
 from app.memory.errors import (
     MemoryCandidateAlreadyResolvedError,
@@ -38,7 +39,11 @@ from app.memory.models import (
     MemoryEmbedding,
     MemorySource,
 )
-from app.memory.schemas import MemoryCandidateDraft, MemoryPatch
+from app.memory.schemas import (
+    PROVENANCE_SNIPPET_MAX_CHARS,
+    MemoryCandidateDraft,
+    MemoryPatch,
+)
 from app.observability.logging import get_logger
 from app.twin.models import Twin
 
@@ -119,6 +124,54 @@ class MemoryService:
         await self._session.delete(memory)
         await self._session.commit()
         logger.info("memory.deleted", memory_id=str(memory_id))
+
+    async def get_provenance(
+        self, twin: Twin, memory_id: uuid.UUID
+    ) -> tuple[Memory, list[tuple[MemorySource, str | None, bool]]]:
+        """Return the memory and its sources with bounded source snippets.
+
+        For each `MemorySource` on the memory, if `source_message_id` is set
+        and the message still exists AND the message belongs to a conversation
+        under this twin (defence in depth — the twin-ownership check at the
+        memory level is enough but we don't want to leak another user's
+        message content if a bug ever broke that), its content is truncated
+        to ``PROVENANCE_SNIPPET_MAX_CHARS`` characters and returned alongside
+        the source. Otherwise the snippet is `None`.
+
+        Returns `[(source, snippet, truncated), ...]` for callers to format.
+        """
+        memory = await self.get(twin, memory_id)
+        out: list[tuple[MemorySource, str | None, bool]] = []
+        for source in memory.sources:
+            snippet, truncated = await self._source_snippet(twin, source)
+            out.append((source, snippet, truncated))
+        return memory, out
+
+    async def _source_snippet(
+        self, twin: Twin, source: MemorySource
+    ) -> tuple[str | None, bool]:
+        if source.source_message_id is None:
+            return None, False
+        # Look up the message AND join to its conversation so we only read
+        # content that actually belongs to this user's twin. If the message
+        # was deleted (FK was set to NULL) or lives under another twin, the
+        # snippet is None.
+        from app.conversation.models import Conversation  # local import avoids cycle
+
+        stmt = (
+            select(Message.content)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Message.id == source.source_message_id,
+                Conversation.twin_id == twin.id,
+            )
+        )
+        content = (await self._session.execute(stmt)).scalar_one_or_none()
+        if content is None:
+            return None, False
+        if len(content) > PROVENANCE_SNIPPET_MAX_CHARS:
+            return content[:PROVENANCE_SNIPPET_MAX_CHARS] + "…", True
+        return content, False
 
     # ------------- Candidate lifecycle -------------
 

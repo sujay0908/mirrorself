@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,6 +40,13 @@ class MessageOut(BaseModel):
     llm_model: str | None
     input_tokens: int | None
     output_tokens: int | None
+    # Sprint 4 (DF5): mobile reads retrieval + goal metadata here to render
+    # the tap-to-reveal "memories used" and "goals considered" rows under a
+    # twin reply. The shape mirrors what the service writes in
+    # `ConversationService.post_message`: `retrieval` and `goals_context`
+    # sub-objects, plus `finish_reason`. Opaque for user-role rows (and
+    # safe when absent).
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 

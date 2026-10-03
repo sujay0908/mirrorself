@@ -31,6 +31,8 @@ from app.common.tasks import TaskRunner
 from app.conversation.models import Conversation, Message
 from app.conversation.pipeline import run_pipeline
 from app.conversation.schemas import ConversationCreateIn
+from app.goal.models import Goal
+from app.goal.service import GoalService
 from app.llm.interface import LLMProvider
 from app.memory.context import ContextBuilder, TwinContext
 from app.memory.retrieval import MemoryRetriever, RetrievalResult
@@ -46,6 +48,11 @@ class ConversationNotFoundError(NotFoundError):
 
 
 class ConversationService:
+    # Sprint 4 (DF8): a hard cap on the number of active goals carried into
+    # the prompt per turn. Kept as a service-layer constant so the
+    # ContextBuilder's `max_active_goals` and the goal query stay aligned.
+    _MAX_ACTIVE_GOALS_IN_CONTEXT: int = 3
+
     def __init__(
         self,
         session: AsyncSession,
@@ -57,6 +64,7 @@ class ConversationService:
         extraction_provider: LLMProvider | None = None,
         retriever: MemoryRetriever | None = None,
         context_builder: ContextBuilder | None = None,
+        goal_service: GoalService | None = None,
     ) -> None:
         self._session = session
         self._provider = provider
@@ -66,6 +74,7 @@ class ConversationService:
         self._extraction_provider = extraction_provider or provider
         self._retriever = retriever
         self._context_builder = context_builder or ContextBuilder()
+        self._goal_service = goal_service
 
     async def list_for_twin(self, twin: Twin) -> list[Conversation]:
         stmt = (
@@ -142,10 +151,15 @@ class ConversationService:
             query_text=content,
             conversation_id=conv.id,
         )
+        active_goals, goals_ok, goals_error = await self._load_active_goals_safely(
+            twin=twin,
+            conversation_id=conv.id,
+        )
         twin_context: TwinContext = self._context_builder.build(
             twin=twin,
             retrieved=retrieval.items,
             recent_messages=history,
+            active_goals=active_goals,
         )
 
         response = await run_pipeline(
@@ -170,6 +184,12 @@ class ConversationService:
                     "memories_returned": len(retrieval.items),
                     "memory_ids": [str(r.memory.id) for r in retrieval.items],
                 },
+                "goals_context": {
+                    "ok": goals_ok,
+                    "error": goals_error,
+                    "goals_used": len(active_goals),
+                    "goal_ids": [str(g.id) for g in active_goals],
+                },
             },
         )
         self._session.add(twin_msg)
@@ -189,6 +209,8 @@ class ConversationService:
             output_tokens=response.output_tokens,
             retrieval_ok=retrieval.ok,
             memories_used=len(retrieval.items),
+            goals_ok=goals_ok,
+            goals_used=len(active_goals),
         )
 
         self._enqueue_memory_extraction(
@@ -248,6 +270,40 @@ class ConversationService:
                 metadata=result.metadata,
             )
         return result
+
+    async def _load_active_goals_safely(
+        self,
+        *,
+        twin: Twin,
+        conversation_id: uuid.UUID,
+    ) -> tuple[list[Goal], bool, str | None]:
+        """Load active goals for the TwinContext; never fail chat on error.
+
+        Returns (goals, ok, error). An empty list + ok=True is the common
+        path (no goals yet). An empty list + ok=False means loading failed
+        and the chat continues without goal context.
+        """
+        if self._goal_service is None:
+            logger.info(
+                "goals.context.skipped",
+                reason="service_not_wired",
+                conversation_id=str(conversation_id),
+                twin_id=str(twin.id),
+            )
+            return [], True, None
+        try:
+            goals = await self._goal_service.list_active_for_context(
+                twin, limit=self._MAX_ACTIVE_GOALS_IN_CONTEXT
+            )
+            return list(goals), True, None
+        except Exception as exc:
+            logger.warning(
+                "goals.context.failed",
+                error=type(exc).__name__,
+                conversation_id=str(conversation_id),
+                twin_id=str(twin.id),
+            )
+            return [], False, f"unhandled:{type(exc).__name__}"
 
     def _enqueue_memory_extraction(
         self,

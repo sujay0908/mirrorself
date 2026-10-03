@@ -18,6 +18,7 @@ from app.db.base import Base, TimestampMixin, UUIDPKMixin
 
 if TYPE_CHECKING:
     from app.conversation.models import Conversation
+    from app.goal.models import Goal
 
 
 class Twin(Base, UUIDPKMixin, TimestampMixin):
@@ -35,6 +36,12 @@ class Twin(Base, UUIDPKMixin, TimestampMixin):
     )
     conversations: Mapped[list[Conversation]] = relationship(
         back_populates="twin",
+        cascade="all, delete-orphan",
+    )
+    # Sprint 4: goals cascade with the twin so deleting a user wipes their
+    # goals too. GoalService never crosses twins so the FK suffices.
+    goals: Mapped[list[Goal]] = relationship(
+        "Goal",
         cascade="all, delete-orphan",
     )
 

@@ -19,6 +19,7 @@ from app.common.tasks import FastAPIBackgroundRunner, TaskRunner
 from app.config import Settings, get_settings
 from app.conversation.service import ConversationService
 from app.db.session import get_db_session, get_sessionmaker
+from app.goal.service import GoalService
 from app.llm.interface import EmbeddingProvider, LLMProvider
 from app.llm.registry import get_embedding_provider, get_llm_provider
 from app.memory.context import ContextBuilder
@@ -89,31 +90,6 @@ def twin_service_dep(session: DBSession) -> TwinService:
 TwinServiceDep = Annotated[TwinService, Depends(twin_service_dep)]
 
 
-def conversation_service_dep(
-    session: DBSession,
-    provider: LLMProviderDep,
-    extraction_provider: ExtractionLLMProviderDep,
-    sessionmaker: SessionmakerDep,
-    task_runner: TaskRunnerDep,
-    settings: SettingsDep,
-    retriever: MemoryRetrieverDep,
-    context_builder: ContextBuilderDep,
-) -> ConversationService:
-    return ConversationService(
-        session,
-        provider,
-        sessionmaker=sessionmaker,
-        llm_model=settings.llm_model,
-        task_runner=task_runner,
-        extraction_provider=extraction_provider,
-        retriever=retriever,
-        context_builder=context_builder,
-    )
-
-
-ConversationServiceDep = Annotated[ConversationService, Depends(conversation_service_dep)]
-
-
 def memory_service_dep(
     session: DBSession,
     embedding_provider: EmbeddingProviderDep,
@@ -139,3 +115,37 @@ def context_builder_dep() -> ContextBuilder:
 
 
 ContextBuilderDep = Annotated[ContextBuilder, Depends(context_builder_dep)]
+
+
+def goal_service_dep(session: DBSession) -> GoalService:
+    return GoalService(session)
+
+
+GoalServiceDep = Annotated[GoalService, Depends(goal_service_dep)]
+
+
+def conversation_service_dep(
+    session: DBSession,
+    provider: LLMProviderDep,
+    extraction_provider: ExtractionLLMProviderDep,
+    sessionmaker: SessionmakerDep,
+    task_runner: TaskRunnerDep,
+    settings: SettingsDep,
+    retriever: MemoryRetrieverDep,
+    context_builder: ContextBuilderDep,
+    goal_service: GoalServiceDep,
+) -> ConversationService:
+    return ConversationService(
+        session,
+        provider,
+        sessionmaker=sessionmaker,
+        llm_model=settings.llm_model,
+        task_runner=task_runner,
+        extraction_provider=extraction_provider,
+        retriever=retriever,
+        context_builder=context_builder,
+        goal_service=goal_service,
+    )
+
+
+ConversationServiceDep = Annotated[ConversationService, Depends(conversation_service_dep)]

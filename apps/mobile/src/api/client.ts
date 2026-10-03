@@ -8,6 +8,17 @@ import { config } from '@/config';
 import type {
   APIErrorBody,
   Conversation,
+  Goal,
+  GoalCreateIn,
+  GoalEvent,
+  GoalStatus,
+  GoalUpdateIn,
+  Memory,
+  MemoryCandidate,
+  MemoryCandidateConfirm,
+  MemoryPatch,
+  MemoryProvenance,
+  MemoryType,
   Message,
   MessagePair,
   Twin,
@@ -60,6 +71,13 @@ async function request<T>(
   return (await resp.json()) as T;
 }
 
+export type CandidateQuery =
+  | 'pending'
+  | 'confirmed'
+  | 'rejected'
+  | 'expired'
+  | 'all';
+
 export const api = {
   // Twin
   getTwin: () => request<Twin>('GET', '/twin'),
@@ -78,6 +96,47 @@ export const api = {
     request<{ items: Message[] }>('GET', `/conversations/${id}/messages`),
   postMessage: (id: UUID, content: string) =>
     request<MessagePair>('POST', `/conversations/${id}/messages`, { content }),
+
+  // Memories (Sprint 4)
+  listMemories: (type?: MemoryType) => {
+    const q = type ? `?type=${encodeURIComponent(type)}` : '';
+    return request<{ items: Memory[] }>('GET', `/memories${q}`);
+  },
+  getMemory: (id: UUID) => request<Memory>('GET', `/memories/${id}`),
+  patchMemory: (id: UUID, patch: MemoryPatch) =>
+    request<Memory>('PATCH', `/memories/${id}`, patch),
+  deleteMemory: (id: UUID) => request<void>('DELETE', `/memories/${id}`),
+  getMemoryProvenance: (id: UUID) =>
+    request<MemoryProvenance>('GET', `/memories/${id}/provenance`),
+
+  // Memory candidates (Sprint 2 + reuse in Sprint 4 UX)
+  listCandidates: (status: CandidateQuery = 'pending') => {
+    const q = status === 'all' ? '?status=all' : `?status=${status}`;
+    return request<{ items: MemoryCandidate[] }>(
+      'GET',
+      `/memory-candidates${q}`,
+    );
+  },
+  confirmCandidate: (id: UUID) =>
+    request<MemoryCandidateConfirm>(
+      'POST',
+      `/memory-candidates/${id}/confirm`,
+    ),
+  rejectCandidate: (id: UUID) =>
+    request<MemoryCandidate>('POST', `/memory-candidates/${id}/reject`),
+
+  // Goals (Sprint 4)
+  listGoals: (status?: GoalStatus) => {
+    const q = status ? `?status=${status}` : '';
+    return request<{ items: Goal[] }>('GET', `/goals${q}`);
+  },
+  createGoal: (payload: GoalCreateIn) =>
+    request<Goal>('POST', '/goals', payload),
+  getGoal: (id: UUID) => request<Goal>('GET', `/goals/${id}`),
+  patchGoal: (id: UUID, patch: GoalUpdateIn) =>
+    request<Goal>('PATCH', `/goals/${id}`, patch),
+  listGoalEvents: (id: UUID) =>
+    request<{ items: GoalEvent[] }>('GET', `/goals/${id}/events`),
 };
 
 export type API = typeof api;
