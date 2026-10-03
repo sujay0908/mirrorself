@@ -114,3 +114,32 @@ class MemoryCandidateDraft(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0, default=0.5)
     importance: float = Field(ge=0.0, le=1.0, default=0.5)
     rationale: str | None = None
+
+
+# Sprint 4: Memory provenance surfaces the originating message/conversation
+# to the user via `GET /v1/memories/{id}/provenance`. The snippet is a
+# bounded (≤240 char) view of the source message content; the full message
+# is reachable through conversations endpoints.
+PROVENANCE_SNIPPET_MAX_CHARS: int = 240
+
+
+class MemoryProvenanceSourceOut(BaseModel):
+    """A single source entry on a memory's provenance report."""
+
+    source_id: uuid.UUID
+    source_type: MemorySourceType
+    source_message_id: uuid.UUID | None
+    source_conversation_id: uuid.UUID | None
+    created_at: datetime
+    # Bounded sanitized snippet of the originating message. Never contains
+    # the full message. `None` when the source isn't a message or the
+    # message was deleted (`source_message_id` set to NULL by FK).
+    source_snippet: str | None = None
+    source_snippet_truncated: bool = False
+
+
+class MemoryProvenanceOut(BaseModel):
+    """Full provenance envelope for `GET /v1/memories/{id}/provenance`."""
+
+    memory_id: uuid.UUID
+    sources: list[MemoryProvenanceSourceOut]
