@@ -1,10 +1,18 @@
 /**
  * Cross-package API type definitions.
  *
- * Sprint 1: hand-authored, mirrored from `apps/api/app/**/schemas.py`.
+ * Sprint 1: hand-authored, mirrored from each domain's schemas.py under
+ * apps/api/app (for example apps/api/app/twin/schemas.py).
  * Sprint 2+: replaced by `generated.ts` produced from
- * `apps/api/app/main.py`'s OpenAPI schema by `openapi-typescript`. CI diffs
+ * apps/api/app/main.py's OpenAPI schema by openapi-typescript. CI diffs
  * this file against the generated output; drift is a build failure.
+ *
+ * Historical note: the earlier wording of this comment used the glob
+ * pattern `apps/api/app/<star><star>/schemas.py`, written with real
+ * asterisks. That sequence (double-star-slash) is the END delimiter of a
+ * JSDoc block comment, so `tsc` closed the comment inside this header and
+ * tried to parse the rest of the file as source. The sentence above now
+ * describes the mirror without using that pattern.
  */
 
 export type UUID = string;
