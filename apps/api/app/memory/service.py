@@ -31,7 +31,13 @@ from app.memory.errors import (
     MemoryCandidateNotFoundError,
     MemoryNotFoundError,
 )
-from app.memory.models import Memory, MemoryCandidate, MemoryEmbedding, MemorySource
+from app.memory.models import (
+    SEMANTIC_EMBEDDING_DIM,
+    Memory,
+    MemoryCandidate,
+    MemoryEmbedding,
+    MemorySource,
+)
 from app.memory.schemas import MemoryCandidateDraft, MemoryPatch
 from app.observability.logging import get_logger
 from app.twin.models import Twin
@@ -307,11 +313,21 @@ class MemoryService:
         if not resp.embeddings:
             return False, "empty_embedding_response"
 
+        raw_vector = resp.embeddings[0]
+        # Populate the Sprint 3 pgvector column ONLY when the provider's
+        # vector matches the pinned retrieval dimension. Other-dimension
+        # providers still land in the legacy JSON `vector` column so no
+        # memory is lost, but they will not appear in semantic retrieval
+        # until a backfill job re-embeds them with the configured model.
+        semantic_vector: list[float] | None = (
+            list(raw_vector) if resp.dimensions == SEMANTIC_EMBEDDING_DIM else None
+        )
         emb = MemoryEmbedding(
             memory_id=memory.id,
             embedding_model=resp.model,
             embedding_dimensions=resp.dimensions,
-            vector=resp.embeddings[0],
+            vector=raw_vector,
+            embedding_vector=semantic_vector,
         )
         self._session.add(emb)
         try:
@@ -332,6 +348,7 @@ class MemoryService:
             memory_id=str(memory.id),
             model=resp.model,
             dimensions=resp.dimensions,
+            semantic_vector_present=semantic_vector is not None,
         )
         return True, None
 

@@ -21,6 +21,8 @@ from app.conversation.service import ConversationService
 from app.db.session import get_db_session, get_sessionmaker
 from app.llm.interface import EmbeddingProvider, LLMProvider
 from app.llm.registry import get_embedding_provider, get_llm_provider
+from app.memory.context import ContextBuilder
+from app.memory.retrieval import MemoryRetriever
 from app.memory.service import MemoryService
 from app.twin.service import TwinService
 
@@ -94,6 +96,8 @@ def conversation_service_dep(
     sessionmaker: SessionmakerDep,
     task_runner: TaskRunnerDep,
     settings: SettingsDep,
+    retriever: MemoryRetrieverDep,
+    context_builder: ContextBuilderDep,
 ) -> ConversationService:
     return ConversationService(
         session,
@@ -102,6 +106,8 @@ def conversation_service_dep(
         llm_model=settings.llm_model,
         task_runner=task_runner,
         extraction_provider=extraction_provider,
+        retriever=retriever,
+        context_builder=context_builder,
     )
 
 
@@ -116,3 +122,20 @@ def memory_service_dep(
 
 
 MemoryServiceDep = Annotated[MemoryService, Depends(memory_service_dep)]
+
+
+def memory_retriever_dep(
+    session: DBSession,
+    embedding_provider: EmbeddingProviderDep,
+) -> MemoryRetriever:
+    return MemoryRetriever(session, embedding_provider=embedding_provider)
+
+
+MemoryRetrieverDep = Annotated[MemoryRetriever, Depends(memory_retriever_dep)]
+
+
+def context_builder_dep() -> ContextBuilder:
+    return ContextBuilder()
+
+
+ContextBuilderDep = Annotated[ContextBuilder, Depends(context_builder_dep)]

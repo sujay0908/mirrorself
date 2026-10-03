@@ -40,6 +40,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
+from app.db.types import VectorColumn
+
+# Sprint 3 pins semantic retrieval to a single dimension so pgvector can
+# use typed `vector(N)` indexes. Changing this requires a new migration.
+SEMANTIC_EMBEDDING_DIM: int = 1536
 
 if TYPE_CHECKING:
     pass
@@ -168,10 +173,17 @@ class MemoryEmbedding(Base, UUIDPKMixin):
     )
     embedding_model: Mapped[str] = mapped_column(String(128), nullable=False)
     embedding_dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Vector stored as JSON array in Sprint 2 — portable to SQLite for tests
-    # and to Postgres for prod. Sprint 3 (retrieval) migrates the Postgres
-    # column to pgvector; see docs/architecture/memory-system.md.
+    # Legacy Sprint 2 JSON vector column. Kept for one release so Sprint 2
+    # rows remain readable while retrieval migrates to the typed column
+    # below. A later migration will drop this column.
     vector: Mapped[list[float]] = mapped_column(JSON, nullable=False)
+    # Sprint 3 semantic column. Nullable: rows without a semantic vector
+    # (legacy Sprint 2 rows, provider failures) are retrievable AS MEMORIES
+    # via listing endpoints but are SKIPPED by semantic retrieval. A future
+    # backfill job regenerates missing vectors against the current provider.
+    embedding_vector: Mapped[list[float] | None] = mapped_column(
+        VectorColumn(SEMANTIC_EMBEDDING_DIM), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
