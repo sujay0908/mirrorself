@@ -86,9 +86,7 @@ def test_renderer_output_is_deterministic() -> None:
     twin = _twin(colour="green")
     r = _retrieved("00000000-0000-0000-0000-00000000abcd", content="x")
     g = _goal("cccccccc", title="Goal c", priority=2)
-    ctx = ContextBuilder().build(
-        twin, retrieved=[r], recent_messages=[], active_goals=[g]
-    )
+    ctx = ContextBuilder().build(twin, retrieved=[r], recent_messages=[], active_goals=[g])
     assert render_system_prompt(ctx) == render_system_prompt(ctx)
 
 
@@ -125,18 +123,14 @@ def test_renderer_omits_section_headers_when_empty() -> None:
 
 def test_renderer_never_leaks_full_uuid() -> None:
     twin = _twin()
-    r = _retrieved(
-        "deadbeef-dead-beef-dead-beefdeadbeef", content="I love filter coffee."
-    )
+    r = _retrieved("deadbeef-dead-beef-dead-beefdeadbeef", content="I love filter coffee.")
     g = _goal(
         "feedfeed",
         title="Finish the memoir",
         priority=1,
         target_date=datetime(2026, 12, 31, tzinfo=UTC),
     )
-    ctx = ContextBuilder().build(
-        twin, retrieved=[r], recent_messages=[], active_goals=[g]
-    )
+    ctx = ContextBuilder().build(twin, retrieved=[r], recent_messages=[], active_goals=[g])
     out = render_system_prompt(ctx)
     # No full UUID.
     assert UUID_RE.search(out) is None
@@ -149,15 +143,9 @@ def test_renderer_never_leaks_full_uuid() -> None:
 
 def test_renderer_does_not_leak_short_id_segments() -> None:
     twin = _twin()
-    r = _retrieved(
-        "abcdef01-0000-0000-0000-000000000000", content="A fact."
-    )
-    g = _goal(
-        "fedcba98", title="A goal", priority=4
-    )
-    ctx = ContextBuilder().build(
-        twin, retrieved=[r], recent_messages=[], active_goals=[g]
-    )
+    r = _retrieved("abcdef01-0000-0000-0000-000000000000", content="A fact.")
+    g = _goal("fedcba98", title="A goal", priority=4)
+    ctx = ContextBuilder().build(twin, retrieved=[r], recent_messages=[], active_goals=[g])
     out = render_system_prompt(ctx)
     assert "abcdef01" not in out
     assert "fedcba98" not in out
@@ -220,9 +208,7 @@ def test_renderer_section_order_is_goals_then_memories() -> None:
     twin = _twin()
     r = _retrieved("00000000-0000-0000-0000-000000000002", content="A memory")
     g = _goal("00000001", title="A goal", priority=1)
-    ctx = ContextBuilder().build(
-        twin, retrieved=[r], recent_messages=[], active_goals=[g]
-    )
+    ctx = ContextBuilder().build(twin, retrieved=[r], recent_messages=[], active_goals=[g])
     out = render_system_prompt(ctx)
     goals_pos = out.index("ACTIVE GOALS")
     memories_pos = out.index("CONFIRMED MEMORIES")
@@ -259,7 +245,5 @@ def test_context_to_system_prompt_matches_renderer() -> None:
     twin = _twin(colour="indigo")
     r = _retrieved("00000000-0000-0000-0000-000000000003", content="hello")
     g = _goal("00000003", title="A goal")
-    ctx = ContextBuilder().build(
-        twin, retrieved=[r], recent_messages=[], active_goals=[g]
-    )
+    ctx = ContextBuilder().build(twin, retrieved=[r], recent_messages=[], active_goals=[g])
     assert ctx.to_system_prompt() == render_system_prompt(ctx)

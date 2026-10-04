@@ -100,8 +100,7 @@ def test_provenance_map_links_short_to_full() -> None:
 
 def test_builder_bounded_memory_count() -> None:
     many = [
-        _retrieved(f"00000000-0000-0000-0000-00000000000{i:x}", content=f"m{i}")
-        for i in range(16)
+        _retrieved(f"00000000-0000-0000-0000-00000000000{i:x}", content=f"m{i}") for i in range(16)
     ]
     budget = ContextBudget(max_memories=3)
     ctx = ContextBuilder(budget).build(_twin(), retrieved=many, recent_messages=[])

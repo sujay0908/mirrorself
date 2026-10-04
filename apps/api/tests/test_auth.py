@@ -79,9 +79,7 @@ async def test_hs256_dev_secret_accepts_valid_token(session_factory) -> None:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             # No Twin yet → 404, but the auth layer accepted the token.
-            resp = await c.get(
-                "/v1/twin", headers={"Authorization": f"Bearer {token}"}
-            )
+            resp = await c.get("/v1/twin", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 404
         assert resp.json()["error"]["code"] == "twin_not_found"
     finally:

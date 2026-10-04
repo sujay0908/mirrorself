@@ -62,12 +62,8 @@ async def test_retrieval_failure_does_not_fail_chat(client, session_factory) -> 
         assert sorted(m.role for m in msgs) == ["twin", "user"]
 
     # 3. Retrieval failure is observable in structured telemetry.
-    failure_events = [
-        e for e in captured if e.get("event") == "memory.retrieval.failed"
-    ]
-    assert failure_events, (
-        f"Expected memory.retrieval.failed event. Captured: {captured!r}"
-    )
+    failure_events = [e for e in captured if e.get("event") == "memory.retrieval.failed"]
+    assert failure_events, f"Expected memory.retrieval.failed event. Captured: {captured!r}"
     ev = failure_events[0]
     assert "RuntimeError" in str(ev.get("reason", ""))
     assert "twin_id" in ev
@@ -78,15 +74,11 @@ async def test_retrieval_failure_does_not_fail_chat(client, session_factory) -> 
     for e in captured:
         for value in e.values():
             if isinstance(value, str):
-                assert secret_phrase not in value, (
-                    f"user content leaked into log event: {e!r}"
-                )
+                assert secret_phrase not in value, f"user content leaked into log event: {e!r}"
 
 
 @pytest.mark.asyncio
-async def test_retrieval_metadata_recorded_on_twin_message(
-    client, session_factory
-) -> None:
+async def test_retrieval_metadata_recorded_on_twin_message(client, session_factory) -> None:
     """The twin message's metadata_json must record whether retrieval ran
     OK and how many memories were returned — this is the audit trail for
     'what did the LLM see?' at request time.
@@ -101,13 +93,7 @@ async def test_retrieval_metadata_recorded_on_twin_message(
 
     async with session_factory() as s:
         twin_msg = (
-            (
-                await s.execute(
-                    select(Message).where(Message.role == "twin")
-                )
-            )
-            .scalars()
-            .first()
+            (await s.execute(select(Message).where(Message.role == "twin"))).scalars().first()
         )
         assert twin_msg is not None
         meta = twin_msg.metadata_json

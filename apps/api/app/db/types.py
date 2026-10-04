@@ -49,14 +49,10 @@ class VectorColumn(TypeDecorator[list[float]]):
             return cast(TypeEngine[Any], dialect.type_descriptor(Vector(self.dim)))
         return cast(TypeEngine[Any], dialect.type_descriptor(JSON()))
 
-    def process_bind_param(
-        self, value: list[float] | None, dialect: Any
-    ) -> list[float] | None:
+    def process_bind_param(self, value: list[float] | None, dialect: Any) -> list[float] | None:
         return value
 
-    def process_result_value(
-        self, value: Any, dialect: Any
-    ) -> list[float] | None:
+    def process_result_value(self, value: Any, dialect: Any) -> list[float] | None:
         if value is None:
             return None
         # pgvector returns a numpy-compatible sequence; normalise to list.

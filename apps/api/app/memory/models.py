@@ -77,9 +77,7 @@ class Memory(Base, UUIDPKMixin, TimestampMixin):
         ),
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), nullable=False, index=True
-    )
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
     twin_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("twins.id", ondelete="CASCADE"),
@@ -91,15 +89,11 @@ class Memory(Base, UUIDPKMixin, TimestampMixin):
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     importance: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
-    user_confirmed: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    user_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_confirmed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
     sources: Mapped[list[MemorySource]] = relationship(
         back_populates="memory",
@@ -139,9 +133,7 @@ class MemorySource(Base, UUIDPKMixin):
         ForeignKey("conversations.id", ondelete="SET NULL"),
         nullable=True,
     )
-    source_metadata: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    source_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -156,7 +148,8 @@ class MemoryEmbedding(Base, UUIDPKMixin):
     __tablename__ = "memory_embeddings"
     __table_args__ = (
         UniqueConstraint(
-            "memory_id", "embedding_model",
+            "memory_id",
+            "embedding_model",
             name="uq_memory_embedding_model",
         ),
         CheckConstraint(
@@ -215,9 +208,7 @@ class MemoryCandidate(Base, UUIDPKMixin, TimestampMixin):
         ),
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), nullable=False, index=True
-    )
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
     twin_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("twins.id", ondelete="CASCADE"),
@@ -239,9 +230,7 @@ class MemoryCandidate(Base, UUIDPKMixin, TimestampMixin):
         nullable=True,
     )
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="pending"
-    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     resulting_memory_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("memories.id", ondelete="SET NULL"),

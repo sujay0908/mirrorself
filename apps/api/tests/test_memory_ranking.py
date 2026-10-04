@@ -126,10 +126,7 @@ def test_custom_weights_change_ranking() -> None:
         w_rec=0.0,
         w_stale=0.0,
     )
-    flipped = [
-        r.memory_id
-        for r in rank_candidates([a, b], weights=importance_dominant, now=NOW)
-    ]
+    flipped = [r.memory_id for r in rank_candidates([a, b], weights=importance_dominant, now=NOW)]
     assert flipped[0] == "b"
 
 

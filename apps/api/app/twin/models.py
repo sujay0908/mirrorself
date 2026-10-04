@@ -60,8 +60,6 @@ class TwinProfile(Base, UUIDPKMixin, TimestampMixin):
         String(32), nullable=False, default="neutral"
     )
     communication_style_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    basic_profile: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    basic_profile: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
     twin: Mapped[Twin] = relationship(back_populates="profile")

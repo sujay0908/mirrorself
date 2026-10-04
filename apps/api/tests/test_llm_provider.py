@@ -33,9 +33,7 @@ async def test_mock_provider_echoes_last_user_message() -> None:
 async def test_mock_provider_handles_no_user_message() -> None:
     provider = MockProvider()
     resp = await provider.generate_response(
-        LLMRequest(
-            messages=[LLMMessage(role="system", content="hi")], model="mock-echo"
-        )
+        LLMRequest(messages=[LLMMessage(role="system", content="hi")], model="mock-echo")
     )
     assert "no user message" in resp.content
 

@@ -47,9 +47,7 @@ class CapturingLLMProvider:
 
     async def generate_response(self, request: LLMRequest) -> LLMResponse:
         self.requests.append(request)
-        last_user = next(
-            (m for m in reversed(request.messages) if m.role == "user"), None
-        )
+        last_user = next((m for m in reversed(request.messages) if m.role == "user"), None)
         reply = (
             f"twin(capture): I heard you say: {last_user.content}"
             if last_user is not None
@@ -105,9 +103,7 @@ async def _create_conversation(client, title: str = "Hello") -> str:
     return resp.json()["id"]
 
 
-async def _seed_confirmed_memory(
-    client, conv_id: str, user_text: str, memory_content: str
-) -> str:
+async def _seed_confirmed_memory(client, conv_id: str, user_text: str, memory_content: str) -> str:
     """Create a Message under the conversation, extract a candidate from
     it directly through the service, confirm it, and return memory_id.
     """
@@ -238,12 +234,8 @@ async def test_llm_receives_only_active_goals(client) -> None:
     assert r_paused.status_code == 201
     assert r_achieved.status_code == 201
 
-    await client.patch(
-        f"/v1/goals/{r_paused.json()['id']}", json={"status": "paused"}
-    )
-    await client.patch(
-        f"/v1/goals/{r_achieved.json()['id']}", json={"status": "achieved"}
-    )
+    await client.patch(f"/v1/goals/{r_paused.json()['id']}", json={"status": "paused"})
+    await client.patch(f"/v1/goals/{r_achieved.json()['id']}", json={"status": "achieved"})
 
     capture = _install_capturing_provider(client)
     try:
@@ -325,9 +317,7 @@ async def test_integration_pm_interview_scenario(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_prompt_does_not_leak_another_users_memory(
-    client, as_user, user_a, user_b
-) -> None:
+async def test_prompt_does_not_leak_another_users_memory(client, as_user, user_a, user_b) -> None:
     """Section 11(6): a memory confirmed by user A must never surface in
     user B's chat prompt."""
     as_user(user_a)
@@ -376,9 +366,7 @@ async def test_prompt_respects_active_goal_cap(client) -> None:
     await _create_twin(client)
     conv_id = await _create_conversation(client)
     for i in range(5):
-        r = await client.post(
-            "/v1/goals", json={"title": f"Priority goal {i}", "priority": 1}
-        )
+        r = await client.post("/v1/goals", json={"title": f"Priority goal {i}", "priority": 1})
         assert r.status_code == 201
 
     capture = _install_capturing_provider(client)
@@ -531,9 +519,7 @@ async def test_llm_failure_surfaces_as_500(client) -> None:
         app.dependency_overrides.pop(get_llm_provider, None)
     assert resp.status_code == 500
     # No new twin message should land.
-    msgs = (
-        await client.get(f"/v1/conversations/{conv_id}/messages")
-    ).json()["items"]
+    msgs = (await client.get(f"/v1/conversations/{conv_id}/messages")).json()["items"]
     assert not any(m["role"] == "twin" for m in msgs)
 
 
@@ -580,9 +566,7 @@ async def test_llm_response_does_not_mutate_twin_profile(client) -> None:
         app.dependency_overrides.pop(get_llm_provider, None)
 
     profile_after = (await client.get("/v1/twin")).json()
-    assert profile_after["profile"]["basic_profile"] == profile_before[
-        "profile"
-    ]["basic_profile"]
+    assert profile_after["profile"]["basic_profile"] == profile_before["profile"]["basic_profile"]
     assert (
         profile_after["profile"]["communication_style_preset"]
         == profile_before["profile"]["communication_style_preset"]

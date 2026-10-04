@@ -177,8 +177,7 @@ async def test_profile_unchanged_after_extraction(client, session_factory) -> No
     transport = client._transport  # type: ignore[attr-defined]
     app = transport.app
     fixture = FixtureExtractionProvider(
-        '{"candidates":[{"type":"FACT","content":"test fact",'
-        '"confidence":0.9,"importance":0.8}]}'
+        '{"candidates":[{"type":"FACT","content":"test fact","confidence":0.9,"importance":0.8}]}'
     )
     app.dependency_overrides[get_llm_provider] = lambda: fixture
 
@@ -225,9 +224,7 @@ async def test_profile_unchanged_after_extraction(client, session_factory) -> No
 
 
 @pytest.mark.asyncio
-async def test_extraction_failure_does_not_fail_chat(
-    client, session_factory
-) -> None:
+async def test_extraction_failure_does_not_fail_chat(client, session_factory) -> None:
     """ARCHITECTURAL INVARIANT (Sprint 2 close-out):
 
     Chat and extraction use independent FastAPI deps so the extraction
@@ -255,9 +252,7 @@ async def test_extraction_failure_does_not_fail_chat(
     # user's message content never leaks into telemetry.
     secret_user_phrase = "quokka-paradox-7391-ultraviolet"
 
-    app.dependency_overrides[extraction_llm_provider_dep] = (
-        lambda: BrokenExtractionProvider()
-    )
+    app.dependency_overrides[extraction_llm_provider_dep] = lambda: BrokenExtractionProvider()
 
     await client.post("/v1/twin", json={"name": "Aurora"})
     conv = (await client.post("/v1/conversations", json={"title": "t"})).json()
@@ -275,9 +270,7 @@ async def test_extraction_failure_does_not_fail_chat(
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["user_message"]["role"] == "user"
-    assert body["user_message"]["content"] == (
-        f"I just moved to {secret_user_phrase} last month."
-    )
+    assert body["user_message"]["content"] == (f"I just moved to {secret_user_phrase} last month.")
     assert body["twin_message"]["role"] == "twin"
     assert body["twin_message"]["content"].startswith("twin(mock):")
 
@@ -292,12 +285,8 @@ async def test_extraction_failure_does_not_fail_chat(
         assert candidates == []
 
     # 4. Extraction failure is observable through structlog telemetry.
-    failure_events = [
-        e for e in captured if e.get("event") == "memory.extraction.failed"
-    ]
-    assert failure_events, (
-        f"Expected memory.extraction.failed event. Captured: {captured!r}"
-    )
+    failure_events = [e for e in captured if e.get("event") == "memory.extraction.failed"]
+    assert failure_events, f"Expected memory.extraction.failed event. Captured: {captured!r}"
     ev = failure_events[0]
     assert ev["reason"] == "provider_error:RuntimeError"
     assert ev["conversation_id"] == str(conv["id"])

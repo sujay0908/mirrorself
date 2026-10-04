@@ -42,12 +42,8 @@ async def test_reopen_conversation_persists_history(client) -> None:
     await client.post("/v1/twin", json={"name": "Aurora"})
     conv = (await client.post("/v1/conversations", json={"title": "R"})).json()
 
-    await client.post(
-        f"/v1/conversations/{conv['id']}/messages", json={"content": "one"}
-    )
-    await client.post(
-        f"/v1/conversations/{conv['id']}/messages", json={"content": "two"}
-    )
+    await client.post(f"/v1/conversations/{conv['id']}/messages", json={"content": "one"})
+    await client.post(f"/v1/conversations/{conv['id']}/messages", json={"content": "two"})
 
     msgs = (await client.get(f"/v1/conversations/{conv['id']}/messages")).json()["items"]
     assert len(msgs) == 4  # user, twin, user, twin

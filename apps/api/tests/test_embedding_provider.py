@@ -21,9 +21,7 @@ async def test_mock_embedding_is_deterministic() -> None:
 @pytest.mark.asyncio
 async def test_mock_embedding_differs_across_inputs() -> None:
     provider = MockEmbeddingProvider(dimensions=16, model="mock-embed-1")
-    r = await provider.embed(
-        EmbeddingRequest(texts=["one", "two"], model="mock-embed-1")
-    )
+    r = await provider.embed(EmbeddingRequest(texts=["one", "two"], model="mock-embed-1"))
     assert r.embeddings[0] != r.embeddings[1]
 
 

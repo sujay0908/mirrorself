@@ -175,9 +175,7 @@ class ContextBuilder:
                 description is not None
                 and len(description) > self._budget.max_goal_description_chars
             ):
-                description = (
-                    description[: self._budget.max_goal_description_chars] + "…"
-                )
+                description = description[: self._budget.max_goal_description_chars] + "…"
             goal_entries.append(
                 ContextGoalEntry(
                     short_id=short,
@@ -192,9 +190,9 @@ class ContextBuilder:
 
         # Recent turns in chronological order, bounded, excluding system
         # messages which are already synthesised by the system prompt.
-        bounded_messages = [
-            m for m in recent_messages if m.role in ("user", "twin")
-        ][-self._budget.max_history_turns :]
+        bounded_messages = [m for m in recent_messages if m.role in ("user", "twin")][
+            -self._budget.max_history_turns :
+        ]
         turns: list[ContextTurn] = []
         for m in bounded_messages:
             content = m.content

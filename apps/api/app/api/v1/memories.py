@@ -134,9 +134,7 @@ async def list_candidates(
     twin = await twins.require_by_user(user.user_id)
     status_filter = None if status == "all" else status
     items = await memories.list_candidates(twin, status=status_filter)
-    return MemoryCandidateListOut(
-        items=[MemoryCandidateOut.model_validate(c) for c in items]
-    )
+    return MemoryCandidateListOut(items=[MemoryCandidateOut.model_validate(c) for c in items])
 
 
 @candidates_router.post(
@@ -151,8 +149,8 @@ async def confirm_candidate(
     memories: MemoryServiceDep,
 ) -> MemoryCandidateConfirmOut:
     twin = await twins.require_by_user(user.user_id)
-    candidate, memory, embedding_attached, embedding_error = (
-        await memories.confirm_candidate(twin, candidate_id)
+    candidate, memory, embedding_attached, embedding_error = await memories.confirm_candidate(
+        twin, candidate_id
     )
     return MemoryCandidateConfirmOut(
         candidate=MemoryCandidateOut.model_validate(candidate),

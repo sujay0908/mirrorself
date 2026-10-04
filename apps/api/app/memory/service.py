@@ -99,9 +99,7 @@ class MemoryService:
             )
         return memory
 
-    async def patch(
-        self, twin: Twin, memory_id: uuid.UUID, patch: MemoryPatch
-    ) -> Memory:
+    async def patch(self, twin: Twin, memory_id: uuid.UUID, patch: MemoryPatch) -> Memory:
         """Edit a memory the user already accepted.
 
         Deliberately rejects any field named `user_confirmed`. The only path
@@ -147,9 +145,7 @@ class MemoryService:
             out.append((source, snippet, truncated))
         return memory, out
 
-    async def _source_snippet(
-        self, twin: Twin, source: MemorySource
-    ) -> tuple[str | None, bool]:
+    async def _source_snippet(self, twin: Twin, source: MemorySource) -> tuple[str | None, bool]:
         if source.source_message_id is None:
             return None, False
         # Look up the message AND join to its conversation so we only read
@@ -227,9 +223,7 @@ class MemoryService:
             stmt = stmt.where(MemoryCandidate.status == status)
         return list((await self._session.execute(stmt)).scalars())
 
-    async def get_candidate(
-        self, twin: Twin, candidate_id: uuid.UUID
-    ) -> MemoryCandidate:
+    async def get_candidate(self, twin: Twin, candidate_id: uuid.UUID) -> MemoryCandidate:
         stmt = select(MemoryCandidate).where(
             MemoryCandidate.id == candidate_id,
             MemoryCandidate.twin_id == twin.id,
@@ -308,9 +302,7 @@ class MemoryService:
         embedding_attached, embedding_error = await self._best_effort_embed(memory)
         return candidate, memory, embedding_attached, embedding_error
 
-    async def reject_candidate(
-        self, twin: Twin, candidate_id: uuid.UUID
-    ) -> MemoryCandidate:
+    async def reject_candidate(self, twin: Twin, candidate_id: uuid.UUID) -> MemoryCandidate:
         candidate = await self.get_candidate(twin, candidate_id)
         if candidate.status != "pending":
             raise MemoryCandidateAlreadyResolvedError(

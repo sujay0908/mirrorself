@@ -102,9 +102,7 @@ class MemoryExtractor:
                 LLMMessage(role="system", content=SYSTEM_PROMPT),
                 LLMMessage(
                     role="user",
-                    content=_build_user_prompt(
-                        user_message, twin_response, twin_profile
-                    ),
+                    content=_build_user_prompt(user_message, twin_response, twin_profile),
                 ),
             ],
             model=self._model,
@@ -133,9 +131,7 @@ def _is_trivial(text: str) -> bool:
     return len(text.strip().split()) < 4
 
 
-def _build_user_prompt(
-    user_message: str, twin_response: str, profile: TwinProfile | None
-) -> str:
+def _build_user_prompt(user_message: str, twin_response: str, profile: TwinProfile | None) -> str:
     profile_line = ""
     if profile is not None:
         bp = ", ".join(f"{k}={v!r}" for k, v in (profile.basic_profile or {}).items())

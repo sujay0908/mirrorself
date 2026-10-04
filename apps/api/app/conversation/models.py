@@ -54,8 +54,6 @@ class Message(Base, UUIDPKMixin, TimestampMixin):
     llm_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")

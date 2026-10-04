@@ -35,9 +35,7 @@ def _make_anthropic(settings: Settings) -> LLMProvider:
     from app.llm.providers.anthropic import AnthropicProvider
 
     if not settings.anthropic_api_key:
-        raise ProviderNotConfiguredError(
-            "ANTHROPIC_API_KEY is not set but LLM_PROVIDER=anthropic."
-        )
+        raise ProviderNotConfiguredError("ANTHROPIC_API_KEY is not set but LLM_PROVIDER=anthropic.")
     return AnthropicProvider(api_key=settings.anthropic_api_key)
 
 
@@ -45,9 +43,7 @@ def _make_openai(settings: Settings) -> LLMProvider:
     from app.llm.providers.openai import OpenAIProvider
 
     if not settings.openai_api_key:
-        raise ProviderNotConfiguredError(
-            "OPENAI_API_KEY is not set but LLM_PROVIDER=openai."
-        )
+        raise ProviderNotConfiguredError("OPENAI_API_KEY is not set but LLM_PROVIDER=openai.")
     return OpenAIProvider(api_key=settings.openai_api_key)
 
 
@@ -97,9 +93,7 @@ def _make_openai_embedding(settings: Settings) -> EmbeddingProvider:
     from app.llm.providers.openai_embedding import OpenAIEmbeddingProvider
 
     if not settings.openai_api_key:
-        raise ProviderNotConfiguredError(
-            "OPENAI_API_KEY is not set but EMBEDDING_PROVIDER=openai."
-        )
+        raise ProviderNotConfiguredError("OPENAI_API_KEY is not set but EMBEDDING_PROVIDER=openai.")
     return OpenAIEmbeddingProvider(
         api_key=settings.openai_api_key,
         model=settings.embedding_model,

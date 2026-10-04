@@ -121,9 +121,7 @@ async def test_cannot_reject_after_confirm(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cross_user_cannot_confirm_candidate(
-    client, as_user, user_a, user_b
-) -> None:
+async def test_cross_user_cannot_confirm_candidate(client, as_user, user_a, user_b) -> None:
     as_user(user_a)
     cand = await _seed_candidate(client)
 
@@ -135,9 +133,7 @@ async def test_cross_user_cannot_confirm_candidate(
 
 
 @pytest.mark.asyncio
-async def test_cross_user_candidate_list_isolation(
-    client, as_user, user_a, user_b
-) -> None:
+async def test_cross_user_candidate_list_isolation(client, as_user, user_a, user_b) -> None:
     as_user(user_a)
     await _seed_candidate(client)
 
@@ -162,9 +158,7 @@ async def test_confirm_memory_succeeds_when_embedding_provider_fails(
     # Swap the embedding provider for one that raises.
     transport = client._transport  # type: ignore[attr-defined]
     app = transport.app
-    app.dependency_overrides[get_embedding_provider] = (
-        lambda: FailingEmbeddingProvider()
-    )
+    app.dependency_overrides[get_embedding_provider] = lambda: FailingEmbeddingProvider()
     try:
         resp = await client.post(f"/v1/memory-candidates/{cand['id']}/confirm")
     finally:

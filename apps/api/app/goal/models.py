@@ -75,9 +75,7 @@ class Goal(Base, UUIDPKMixin, TimestampMixin):
 
     # user_id is denormalised onto the row for RLS + fast owner-scope
     # queries. The authoritative owner relationship still runs twin_id→twin.
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), nullable=False, index=True
-    )
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
     twin_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("twins.id", ondelete="CASCADE"),
@@ -86,15 +84,9 @@ class Goal(Base, UUIDPKMixin, TimestampMixin):
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    target_date: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    priority: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=GOAL_DEFAULT_PRIORITY
-    )
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="active"
-    )
+    target_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=GOAL_DEFAULT_PRIORITY)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
     # Timestamp of the most recent status transition. Fed into the context
     # tiebreaker (priority, then recency) deterministically.
     status_changed_at: Mapped[datetime] = mapped_column(
@@ -103,9 +95,7 @@ class Goal(Base, UUIDPKMixin, TimestampMixin):
         default=_utcnow,
         server_default=func.now(),
     )
-    metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
     events: Mapped[list[GoalEvent]] = relationship(
         back_populates="goal",

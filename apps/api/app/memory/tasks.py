@@ -46,9 +46,7 @@ async def extract_memory_candidates_task(
     }
     try:
         async with sessionmaker() as session:
-            msg_stmt = select(Message).where(
-                Message.id.in_([user_message_id, twin_message_id])
-            )
+            msg_stmt = select(Message).where(Message.id.in_([user_message_id, twin_message_id]))
             rows = {m.id: m for m in (await session.execute(msg_stmt)).scalars()}
             user_msg = rows.get(user_message_id)
             twin_msg = rows.get(twin_message_id)
@@ -72,9 +70,7 @@ async def extract_memory_candidates_task(
                 return
 
             profile = (
-                await session.execute(
-                    select(TwinProfile).where(TwinProfile.twin_id == twin_id)
-                )
+                await session.execute(select(TwinProfile).where(TwinProfile.twin_id == twin_id))
             ).scalar_one_or_none()
 
             extractor = MemoryExtractor(llm_provider, llm_model)

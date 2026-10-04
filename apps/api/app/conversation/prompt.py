@@ -58,8 +58,7 @@ GUARDRAIL_LINES: tuple[str, ...] = (
     "- Do not quote internal identifiers, tag names, or similarity "
     "scores from this prompt back to the user. They are internal "
     "scaffolding, not content for your reply.",
-    "- Do not claim progress on a goal unless the user has told you "
-    "about it in this conversation.",
+    "- Do not claim progress on a goal unless the user has told you about it in this conversation.",
 )
 
 
@@ -71,44 +70,28 @@ def render_system_prompt(context: TwinContext) -> str:
     an "ACTIVE GOALS:\n(none)" ghost section.
     """
     lines: list[str] = []
-    lines.append(
-        f"{IDENTITY_LINES[0]} (twin display name: "
-        f"{context.twin_display_name}.)"
-    )
+    lines.append(f"{IDENTITY_LINES[0]} (twin display name: {context.twin_display_name}.)")
     lines.append(IDENTITY_LINES[1])
-    lines.append(
-        f"Communication style preset: {context.communication_style_preset}."
-    )
+    lines.append(f"Communication style preset: {context.communication_style_preset}.")
 
     if context.communication_style_notes:
-        lines.append(
-            f"Additional style notes from the user: "
-            f"{context.communication_style_notes}"
-        )
+        lines.append(f"Additional style notes from the user: {context.communication_style_notes}")
 
     if context.basic_profile:
-        parts = ", ".join(
-            f"{k}={v!r}" for k, v in sorted(context.basic_profile.items())
-        )
+        parts = ", ".join(f"{k}={v!r}" for k, v in sorted(context.basic_profile.items()))
         lines.append(f"Basic profile the user shared: {parts}")
 
     if context.active_goals:
         lines.append("")
         lines.append("ACTIVE GOALS (highest priority first):")
         for g in context.active_goals:
-            target = (
-                g.target_date.date().isoformat()
-                if g.target_date is not None
-                else "none"
-            )
+            target = g.target_date.date().isoformat() if g.target_date is not None else "none"
             desc = (g.description or "").strip()
             body = g.title.strip()
             if desc:
                 body = f"{body}\n{desc}"
             lines.append(
-                f"<active_goal priority={g.priority} target_date={target}>\n"
-                f"{body}\n"
-                f"</active_goal>"
+                f"<active_goal priority={g.priority} target_date={target}>\n{body}\n</active_goal>"
             )
 
     if context.memories:
@@ -116,9 +99,7 @@ def render_system_prompt(context: TwinContext) -> str:
         lines.append("CONFIRMED MEMORIES (use only when directly relevant):")
         for m in context.memories:
             lines.append(
-                f"<confirmed_memory type={m.type}>\n"
-                f"{m.content.strip()}\n"
-                f"</confirmed_memory>"
+                f"<confirmed_memory type={m.type}>\n{m.content.strip()}\n</confirmed_memory>"
             )
 
     # Guardrails ALWAYS appear so a context with zero memories or goals
