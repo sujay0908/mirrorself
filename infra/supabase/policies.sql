@@ -120,3 +120,45 @@ CREATE POLICY memory_candidates_owner ON memory_candidates
     FOR ALL
     USING (twin_id IN (SELECT id FROM twins WHERE user_id = auth.uid()))
     WITH CHECK (twin_id IN (SELECT id FROM twins WHERE user_id = auth.uid()));
+
+-- ================================================================
+-- Sprint 4: goals RLS
+-- ================================================================
+--
+-- The 0004_goals migration created these tables but the audit of the
+-- Sprint 4 merge (PR #17 / 6f4ea2b) found no matching RLS policies here,
+-- leaving the documented second line of defence open for goal data.
+-- Policies below follow the existing convention: direct-twin_id tables
+-- match the memories pattern, transitive tables match the memory_sources
+-- pattern (join through the parent to the owning twin).
+
+-- Goals — owned directly via twin_id (same pattern as memories).
+ALTER TABLE goals ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS goals_owner ON goals;
+CREATE POLICY goals_owner ON goals
+    FOR ALL
+    USING (twin_id IN (SELECT id FROM twins WHERE user_id = auth.uid()))
+    WITH CHECK (twin_id IN (SELECT id FROM twins WHERE user_id = auth.uid()));
+
+-- Goal events — owned transitively via goal → twin (same pattern as
+-- memory_sources / memory_embeddings). The service layer guarantees goal
+-- events are append-only; the policy here only enforces ownership, not
+-- the append-only invariant.
+ALTER TABLE goal_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS goal_events_owner ON goal_events;
+CREATE POLICY goal_events_owner ON goal_events
+    FOR ALL
+    USING (
+        goal_id IN (
+            SELECT g.id FROM goals g
+            JOIN twins t ON t.id = g.twin_id
+            WHERE t.user_id = auth.uid()
+        )
+    )
+    WITH CHECK (
+        goal_id IN (
+            SELECT g.id FROM goals g
+            JOIN twins t ON t.id = g.twin_id
+            WHERE t.user_id = auth.uid()
+        )
+    );

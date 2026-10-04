@@ -32,3 +32,19 @@ Sprint 1 uses Supabase for two things:
 The `docker-compose.dev.yml` file spins up a plain Postgres 15 without
 Supabase. Auth is stubbed by the `SUPABASE_JWT_HS_SECRET` env var so tests
 and manual dev do not need a live Supabase instance.
+
+## RLS smoke tests
+
+`tests/goals_rls_smoke.sql` verifies that the Sprint 4 goal policies
+actually block cross-user access. Run it after applying `policies.sql`
+against a Postgres instance (either a Supabase project or a local
+Postgres whose `auth.uid()` has been stubbed — the smoke file does the
+stubbing automatically if the schema is missing):
+
+```
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+     -f infra/supabase/tests/goals_rls_smoke.sql
+```
+
+The script runs inside a single transaction and rolls everything back on
+success or failure, so it leaves no fixture rows behind.
