@@ -23,9 +23,7 @@ from app.memory.context import TwinContext
 
 def build_llm_request(context: TwinContext, user_message_content: str) -> LLMRequest:
     settings = get_settings()
-    messages: list[LLMMessage] = [
-        LLMMessage(role="system", content=context.to_system_prompt())
-    ]
+    messages: list[LLMMessage] = [LLMMessage(role="system", content=context.to_system_prompt())]
     for turn in context.recent_turns:
         role = "assistant" if turn.role == "twin" else "user"
         messages.append(LLMMessage(role=role, content=turn.content))

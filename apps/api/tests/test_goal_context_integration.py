@@ -95,9 +95,7 @@ async def test_zero_active_goals_still_succeeds(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_other_users_goals_never_reach_context(
-    client, as_user, user_a, user_b
-) -> None:
+async def test_other_users_goals_never_reach_context(client, as_user, user_a, user_b) -> None:
     as_user(user_a)
     await client.post("/v1/twin", json={"name": "A"})
     for i in range(3):

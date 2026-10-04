@@ -15,9 +15,7 @@ from app.memory.service import MemoryService
 from app.twin.service import TwinService
 
 
-async def _seed_candidate_from_message(
-    client, conv_id: str, text: str
-) -> str:
+async def _seed_candidate_from_message(client, conv_id: str, text: str) -> str:
     """Create a user message and a candidate linked to it. Return cand id."""
     transport = client._transport  # type: ignore[attr-defined]
     app = transport.app

@@ -80,9 +80,7 @@ async def post_message(
     conversations: ConversationServiceDep,
 ) -> MessagePairOut:
     twin = await twins.require_by_user(user.user_id)
-    user_msg, twin_msg = await conversations.post_message(
-        twin, conversation_id, payload.content
-    )
+    user_msg, twin_msg = await conversations.post_message(twin, conversation_id, payload.content)
     return MessagePairOut(
         user_message=MessageOut.model_validate(user_msg),
         twin_message=MessageOut.model_validate(twin_msg),

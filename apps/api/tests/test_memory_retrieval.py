@@ -74,9 +74,7 @@ async def _create_memory(
     if not confirmed:
         return candidate
     # Confirm via HTTP so the full code path exercises.
-    resp = await (await _client_for(app)).post(
-        f"/v1/memory-candidates/{candidate.id}/confirm"
-    )
+    resp = await (await _client_for(app)).post(f"/v1/memory-candidates/{candidate.id}/confirm")
     assert resp.status_code == 201, resp.text
     return resp.json()["memory"]
 
@@ -128,9 +126,7 @@ async def test_confirmed_memory_is_retrieved(client, session_factory) -> None:
         twin = await TwinService(session).require_by_user(user.user_id)
         retriever = MemoryRetriever(
             session,
-            MockEmbeddingProvider(
-                dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"
-            ),
+            MockEmbeddingProvider(dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"),
         )
         result = await retriever.retrieve(twin, "I live in Bengaluru.")
     assert result.ok
@@ -168,9 +164,7 @@ async def test_pending_memory_candidate_is_not_retrieved(client) -> None:
         )
         retriever = MemoryRetriever(
             session,
-            MockEmbeddingProvider(
-                dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"
-            ),
+            MockEmbeddingProvider(dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"),
         )
         result = await retriever.retrieve(twin, "Candidate not yet confirmed.")
     assert result.ok
@@ -211,9 +205,7 @@ async def test_rejected_memory_is_not_retrieved(client) -> None:
         twin = await TwinService(session).require_by_user(user.user_id)
         retriever = MemoryRetriever(
             session,
-            MockEmbeddingProvider(
-                dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"
-            ),
+            MockEmbeddingProvider(dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"),
         )
         result = await retriever.retrieve(twin, "anything")
     assert result.items == []
@@ -278,9 +270,7 @@ async def test_null_embedding_memory_is_skipped(client) -> None:
         twin = await TwinService(session).require_by_user(user.user_id)
         retriever = MemoryRetriever(
             session,
-            MockEmbeddingProvider(
-                dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"
-            ),
+            MockEmbeddingProvider(dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"),
         )
         result = await retriever.retrieve(twin, "Null-vector memory.")
     assert result.items == []
@@ -326,9 +316,7 @@ async def test_type_filter_excludes_others(client) -> None:
         twin = await TwinService(session).require_by_user(user.user_id)
         retriever = MemoryRetriever(
             session,
-            MockEmbeddingProvider(
-                dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"
-            ),
+            MockEmbeddingProvider(dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"),
         )
         only_facts = await retriever.retrieve(twin, "x", types=["FACT"])
         all_types = await retriever.retrieve(twin, "x")
@@ -374,9 +362,7 @@ async def test_cross_user_and_cross_twin_isolation(
         twin_b = await TwinService(session).require_by_user(user_b.user_id)
         retriever = MemoryRetriever(
             session,
-            MockEmbeddingProvider(
-                dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"
-            ),
+            MockEmbeddingProvider(dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"),
         )
         result = await retriever.retrieve(twin_b, "A's private fact.")
     assert result.ok
@@ -419,9 +405,7 @@ async def test_limit_is_capped(client) -> None:
         twin = await TwinService(session).require_by_user(user.user_id)
         retriever = MemoryRetriever(
             session,
-            MockEmbeddingProvider(
-                dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"
-            ),
+            MockEmbeddingProvider(dimensions=SEMANTIC_EMBEDDING_DIM, model="mock-embed-1"),
         )
         # Ask for way more than MAX_LIMIT; retriever must cap us.
         result = await retriever.retrieve(twin, "anything", limit=1000)

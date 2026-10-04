@@ -68,15 +68,27 @@ def test_builder_includes_profile_fields() -> None:
     assert "colour='green'" in sys
 
 
-def test_builder_includes_memories_with_short_ids_only() -> None:
+def test_builder_includes_memory_content_without_leaking_ids() -> None:
+    """Sprint 5: the rendered prompt carries memory content but no identifiers.
+
+    Earlier sprints embedded `id=<short>` as a tag attribute. Sprint 5
+    removes that attribute (see `app/conversation/prompt.py`) because
+    the LLM has no legitimate use for an internal id; keeping it would
+    risk the model echoing it back to the user. The server-side
+    `provenance_map` on `TwinContext` still records the short→full
+    mapping for the debug/trace layer.
+    """
     full_id = "00000000-0000-0000-0000-00000000abcd"
     r = _retrieved(full_id, content="I live in Bengaluru.")
     ctx = ContextBuilder().build(_twin(), retrieved=[r], recent_messages=[])
     sys = ctx.to_system_prompt()
-    assert "<confirmed_memory id=00000000 type=FACT>" in sys
+    assert "<confirmed_memory type=FACT>" in sys
     assert "I live in Bengaluru." in sys
-    # Short IDs only — never the full memory UUID in the prompt.
+    # Neither the full UUID nor its first segment appears in the prompt.
     assert full_id not in sys
+    assert "00000000" not in sys
+    # The provenance map is still populated for the trace layer.
+    assert ctx.provenance_map == {"00000000": full_id}
 
 
 def test_provenance_map_links_short_to_full() -> None:
@@ -88,8 +100,7 @@ def test_provenance_map_links_short_to_full() -> None:
 
 def test_builder_bounded_memory_count() -> None:
     many = [
-        _retrieved(f"00000000-0000-0000-0000-00000000000{i:x}", content=f"m{i}")
-        for i in range(16)
+        _retrieved(f"00000000-0000-0000-0000-00000000000{i:x}", content=f"m{i}") for i in range(16)
     ]
     budget = ContextBudget(max_memories=3)
     ctx = ContextBuilder(budget).build(_twin(), retrieved=many, recent_messages=[])

@@ -29,9 +29,7 @@ async def test_vertical_slice(client) -> None:
     assert twin["profile"]["communication_style_preset"] == "terse"
 
     # 4. Open a conversation.
-    conv = (
-        await client.post("/v1/conversations", json={"title": "Sprint 1"})
-    ).json()
+    conv = (await client.post("/v1/conversations", json={"title": "Sprint 1"})).json()
 
     # 5–7. Send a message; twin responds; both persist.
     pair = await client.post(

@@ -65,9 +65,7 @@ async def test_patch_twin_updates_profile_fields(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cross_user_cannot_access_other_users_twin(
-    client, as_user, user_a, user_b
-) -> None:
+async def test_cross_user_cannot_access_other_users_twin(client, as_user, user_a, user_b) -> None:
     as_user(user_a)
     a = await client.post("/v1/twin", json={"name": "A's Twin"})
     assert a.status_code == 201

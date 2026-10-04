@@ -205,9 +205,7 @@ class MemoryRetriever:
 
         memory_by_id = {str(m.id): (m, sim) for m, sim in raw_candidates}
         ranked_items: list[RetrievedMemory] = []
-        for memory_id, rc in sorted(
-            ranked_lookup.items(), key=lambda kv: (-kv[1].score, kv[0])
-        ):
+        for memory_id, rc in sorted(ranked_lookup.items(), key=lambda kv: (-kv[1].score, kv[0])):
             mem, sim = memory_by_id[memory_id]
             ranked_items.append(
                 RetrievedMemory(

@@ -34,9 +34,7 @@ def get_engine() -> AsyncEngine:
     if _engine is None:
         settings = get_settings()
         _engine = _make_engine(settings.database_url)
-        _sessionmaker = async_sessionmaker(
-            _engine, expire_on_commit=False, class_=AsyncSession
-        )
+        _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
     return _engine
 
 

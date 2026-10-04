@@ -146,9 +146,7 @@ async def test_provenance_unknown_memory_is_404(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_provenance_cross_user_is_404(
-    client, as_user, user_a, user_b
-) -> None:
+async def test_provenance_cross_user_is_404(client, as_user, user_a, user_b) -> None:
     as_user(user_a)
     await _create_twin(client)
     memory_id = await _confirm_memory_from_message(client, "A's private fact.")
@@ -160,9 +158,7 @@ async def test_provenance_cross_user_is_404(
 
 
 @pytest.mark.asyncio
-async def test_provenance_snippet_none_when_message_missing(
-    client, session_factory
-) -> None:
+async def test_provenance_snippet_none_when_message_missing(client, session_factory) -> None:
     """If the source message is gone, the snippet is None (safe default).
 
     On Postgres the FK's ON DELETE SET NULL does this automatically; on

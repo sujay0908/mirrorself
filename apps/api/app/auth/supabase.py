@@ -74,8 +74,7 @@ def verify_supabase_jwt(token: str, settings: Settings) -> AuthenticatedUser:
             claims = _decode_hs(token, settings)
         else:
             raise UnauthorizedError(
-                "Auth not configured: set SUPABASE_JWT_JWKS_URL "
-                "(or SUPABASE_JWT_HS_SECRET in dev)."
+                "Auth not configured: set SUPABASE_JWT_JWKS_URL (or SUPABASE_JWT_HS_SECRET in dev)."
             )
     except JWTError as exc:
         raise UnauthorizedError(f"Invalid token: {exc}") from exc

@@ -41,11 +41,7 @@ async def _seed_candidate_and_confirm(
         )
         [candidate] = await mem_service.create_candidates(
             twin,
-            [
-                MemoryCandidateDraft(
-                    type=type_, content=content, confidence=0.9, importance=0.8
-                )
-            ],
+            [MemoryCandidateDraft(type=type_, content=content, confidence=0.9, importance=0.8)],
         )
     # Confirm via HTTP.
     resp = await client.post(f"/v1/memory-candidates/{candidate.id}/confirm")
@@ -136,9 +132,7 @@ async def test_delete_memory_removes_row_and_embedding(client, session_factory) 
 
 
 @pytest.mark.asyncio
-async def test_cross_user_cannot_access_memory(
-    client, as_user, user_a, user_b
-) -> None:
+async def test_cross_user_cannot_access_memory(client, as_user, user_a, user_b) -> None:
     as_user(user_a)
     memory = await _seed_candidate_and_confirm(client)
 
@@ -148,9 +142,7 @@ async def test_cross_user_cannot_access_memory(
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "memory_not_found"
 
-    resp = await client.patch(
-        f"/v1/memories/{memory['id']}", json={"content": "intrusion"}
-    )
+    resp = await client.patch(f"/v1/memories/{memory['id']}", json={"content": "intrusion"})
     assert resp.status_code == 404
 
     resp = await client.delete(f"/v1/memories/{memory['id']}")
@@ -160,9 +152,7 @@ async def test_cross_user_cannot_access_memory(
 @pytest.mark.asyncio
 async def test_list_memories_filters_by_type(client) -> None:
     await _seed_candidate_and_confirm(client, type_="FACT", content="One FACT.")
-    await _seed_candidate_and_confirm(
-        client, type_="PREFERENCE", content="One PREFERENCE."
-    )
+    await _seed_candidate_and_confirm(client, type_="PREFERENCE", content="One PREFERENCE.")
 
     all_resp = await client.get("/v1/memories")
     assert len(all_resp.json()["items"]) == 2

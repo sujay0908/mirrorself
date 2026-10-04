@@ -114,9 +114,7 @@ class ConversationService:
         )
         return conv
 
-    async def list_messages(
-        self, twin: Twin, conversation_id: uuid.UUID
-    ) -> list[Message]:
+    async def list_messages(self, twin: Twin, conversation_id: uuid.UUID) -> list[Message]:
         conv = await self.get(twin, conversation_id)
         return list(conv.messages)
 
@@ -242,9 +240,7 @@ class ConversationService:
                 conversation_id=str(conversation_id),
                 twin_id=str(twin.id),
             )
-            return RetrievalResult(
-                metadata={"skipped": True, "reason": "retriever_not_wired"}
-            )
+            return RetrievalResult(metadata={"skipped": True, "reason": "retriever_not_wired"})
         try:
             result = await self._retriever.retrieve(twin, query_text)
         except Exception as exc:
@@ -313,11 +309,7 @@ class ConversationService:
         user_message_id: uuid.UUID,
         twin_message_id: uuid.UUID,
     ) -> None:
-        if (
-            self._task_runner is None
-            or self._sessionmaker is None
-            or self._llm_model is None
-        ):
+        if self._task_runner is None or self._sessionmaker is None or self._llm_model is None:
             logger.info(
                 "memory.extraction.not_enqueued",
                 reason="runner_not_wired",

@@ -18,9 +18,7 @@ class MockProvider(LLMProvider):
     provider_name: ClassVar[str] = "mock"
 
     async def generate_response(self, request: LLMRequest) -> LLMResponse:
-        last_user = next(
-            (m for m in reversed(request.messages) if m.role == "user"), None
-        )
+        last_user = next((m for m in reversed(request.messages) if m.role == "user"), None)
         if last_user is None:
             reply = "twin(mock): hello — I have no user message to respond to yet."
         else:

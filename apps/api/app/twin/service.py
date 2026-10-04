@@ -29,11 +29,7 @@ class TwinService:
         self._session = session
 
     async def get_by_user(self, user_id: uuid.UUID) -> Twin | None:
-        stmt = (
-            select(Twin)
-            .where(Twin.user_id == user_id)
-            .options(selectinload(Twin.profile))
-        )
+        stmt = select(Twin).where(Twin.user_id == user_id).options(selectinload(Twin.profile))
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def require_by_user(self, user_id: uuid.UUID) -> Twin:

@@ -148,9 +148,7 @@ async def test_status_transition_active_to_achieved_logs_event(client) -> None:
 @pytest.mark.asyncio
 async def test_illegal_transition_from_achieved_is_rejected(client) -> None:
     await _create_twin(client)
-    goal_id = (
-        await client.post("/v1/goals", json={"title": "Terminal"})
-    ).json()["id"]
+    goal_id = (await client.post("/v1/goals", json={"title": "Terminal"})).json()["id"]
     await client.patch(f"/v1/goals/{goal_id}", json={"status": "achieved"})
 
     attempt = await client.patch(f"/v1/goals/{goal_id}", json={"status": "active"})
@@ -161,9 +159,7 @@ async def test_illegal_transition_from_achieved_is_rejected(client) -> None:
 @pytest.mark.asyncio
 async def test_pause_then_resume_is_legal(client) -> None:
     await _create_twin(client)
-    goal_id = (
-        await client.post("/v1/goals", json={"title": "Paused thing"})
-    ).json()["id"]
+    goal_id = (await client.post("/v1/goals", json={"title": "Paused thing"})).json()["id"]
     paused = await client.patch(f"/v1/goals/{goal_id}", json={"status": "paused"})
     assert paused.status_code == 200
     resumed = await client.patch(f"/v1/goals/{goal_id}", json={"status": "active"})
@@ -174,9 +170,7 @@ async def test_pause_then_resume_is_legal(client) -> None:
 @pytest.mark.asyncio
 async def test_no_op_patch_does_not_emit_updated_event(client) -> None:
     await _create_twin(client)
-    goal_id = (
-        await client.post("/v1/goals", json={"title": "Same", "priority": 3})
-    ).json()["id"]
+    goal_id = (await client.post("/v1/goals", json={"title": "Same", "priority": 3})).json()["id"]
 
     patch_same = await client.patch(
         f"/v1/goals/{goal_id}",
@@ -189,14 +183,10 @@ async def test_no_op_patch_does_not_emit_updated_event(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cross_user_cannot_access_other_users_goal(
-    client, as_user, user_a, user_b
-) -> None:
+async def test_cross_user_cannot_access_other_users_goal(client, as_user, user_a, user_b) -> None:
     as_user(user_a)
     await _create_twin(client)
-    goal_a = (
-        await client.post("/v1/goals", json={"title": "Private to A"})
-    ).json()
+    goal_a = (await client.post("/v1/goals", json={"title": "Private to A"})).json()
     goal_id = goal_a["id"]
 
     as_user(user_b)

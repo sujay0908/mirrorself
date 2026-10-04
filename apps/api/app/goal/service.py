@@ -97,9 +97,7 @@ class GoalService:
         result = await self._session.execute(stmt)
         return result.scalars().all()
 
-    async def list_active_for_context(
-        self, twin: Twin, *, limit: int
-    ) -> Sequence[Goal]:
+    async def list_active_for_context(self, twin: Twin, *, limit: int) -> Sequence[Goal]:
         """Deterministic ordering for TwinContext (DF8).
 
         Order: priority ASC (1 is highest), then updated_at DESC, then id ASC.
@@ -128,9 +126,7 @@ class GoalService:
         """Return a goal owned by this twin or raise GoalNotFoundError."""
         return await self._require_owned_goal(twin, goal_id)
 
-    async def list_events(
-        self, twin: Twin, goal_id: uuid.UUID
-    ) -> Sequence[GoalEvent]:
+    async def list_events(self, twin: Twin, goal_id: uuid.UUID) -> Sequence[GoalEvent]:
         # Resolve the goal first so a wrong-owner / unknown id yields 404
         # rather than an empty list.
         await self._require_owned_goal(twin, goal_id)
@@ -250,9 +246,7 @@ class GoalService:
     # Internals
     # ------------------------------------------------------------------
 
-    async def _require_owned_goal(
-        self, twin: Twin, goal_id: uuid.UUID
-    ) -> Goal:
+    async def _require_owned_goal(self, twin: Twin, goal_id: uuid.UUID) -> Goal:
         stmt = (
             select(Goal)
             .where(
