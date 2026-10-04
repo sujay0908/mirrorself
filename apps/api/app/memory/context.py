@@ -92,65 +92,23 @@ class TwinContext:
     goal_provenance_map: dict[str, str] = field(default_factory=dict)
 
     def to_system_prompt(self) -> str:
-        """Deterministic, structured system prompt for the LLM."""
-        lines: list[str] = [
-            f"You are the Personal AI Twin of the user "
-            f"(twin display name: {self.twin_display_name}).",
-            "You are the evolving personal intelligence — the avatar is the "
-            "interface, the intelligence is the product. Keep responses "
-            "grounded and honest.",
-            f"Communication style preset: {self.communication_style_preset}.",
-        ]
-        if self.communication_style_notes:
-            lines.append(
-                f"Additional style notes from the user: "
-                f"{self.communication_style_notes}"
-            )
-        if self.basic_profile:
-            parts = ", ".join(
-                f"{k}={v!r}" for k, v in sorted(self.basic_profile.items())
-            )
-            lines.append(f"Basic profile the user shared: {parts}")
+        """Render the context as a system prompt string.
 
-        if self.active_goals:
-            lines.append("")
-            lines.append(
-                "The user's CURRENTLY ACTIVE GOALS (highest priority first) "
-                "are listed below. Keep them in mind when the user's message "
-                "touches progress, planning, or trade-offs. Do not quote the "
-                "internal identifiers, and do not fabricate progress."
-            )
-            for g in self.active_goals:
-                target = (
-                    g.target_date.date().isoformat()
-                    if g.target_date is not None
-                    else "none"
-                )
-                desc = (g.description or "").strip()
-                body = g.title.strip()
-                if desc:
-                    body = f"{body}\n{desc}"
-                lines.append(
-                    f"<active_goal id={g.short_id} priority={g.priority} "
-                    f"target_date={target}>\n{body}\n</active_goal>"
-                )
+        Sprint 5 moved the actual rendering into
+        `app.conversation.prompt.render_system_prompt` so the structured
+        context object stays separate from the string it eventually
+        becomes. This method is kept as a thin adapter so the pipeline,
+        tests, and any other callers that already invoke it do not need
+        to change. The renderer is deterministic and pure; see the
+        module docstring on `app.conversation.prompt` for the rules it
+        enforces (no internal ids, no similarity scores, explicit
+        anti-fabrication guardrails).
+        """
+        # Local import keeps the import graph acyclic: `prompt.py` only
+        # type-imports `TwinContext`.
+        from app.conversation.prompt import render_system_prompt
 
-        if self.memories:
-            lines.append("")
-            lines.append(
-                "Use the following CONFIRMED MEMORIES about the user only "
-                "when they are directly relevant to the message. Do not "
-                "assume a memory is relevant just because it was retrieved. "
-                "If a memory is used, you may say what you remember, but do "
-                "not quote internal identifiers."
-            )
-            for m in self.memories:
-                lines.append(
-                    f"<confirmed_memory id={m.short_id} type={m.type}>"
-                    f"\n{m.content.strip()}\n"
-                    f"</confirmed_memory>"
-                )
-        return "\n".join(lines)
+        return render_system_prompt(self)
 
 
 @dataclass(frozen=True, slots=True)

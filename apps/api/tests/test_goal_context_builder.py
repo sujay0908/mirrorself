@@ -50,15 +50,21 @@ def _goal(
 
 
 def test_active_goals_render_in_separate_tag() -> None:
+    """Sprint 5: goals render as `<active_goal priority=.. target_date=..>`
+    without a leaked internal id attribute. The goal content is present;
+    the tag is distinct from `<confirmed_memory>`.
+    """
     g = _goal("aaaaaaaa", title="Ship Sprint 4", priority=1)
     ctx = ContextBuilder().build(
         _twin(), retrieved=[], recent_messages=[], active_goals=[g]
     )
     prompt = ctx.to_system_prompt()
-    assert "<active_goal id=aaaaaaaa priority=1" in prompt
+    assert "<active_goal priority=1 target_date=" in prompt
     assert "Ship Sprint 4" in prompt
     # Memory tag must NOT be used for goals.
     assert "<confirmed_memory" not in prompt
+    # No internal id attribute, no raw UUID or short-id segment.
+    assert "aaaaaaaa" not in prompt
 
 
 def test_builder_caps_active_goals_at_budget() -> None:
@@ -74,12 +80,17 @@ def test_builder_caps_active_goals_at_budget() -> None:
 
 
 def test_builder_omits_active_goals_section_when_empty() -> None:
+    """No active goals → neither the `<active_goal>` tag nor the Sprint 5
+    section heading `ACTIVE GOALS (highest priority first):` appears.
+    The guardrail block (which names the section when telling the LLM
+    what not to echo) is still allowed to mention it.
+    """
     ctx = ContextBuilder().build(
         _twin(), retrieved=[], recent_messages=[], active_goals=[]
     )
     prompt = ctx.to_system_prompt()
     assert "<active_goal" not in prompt
-    assert "CURRENTLY ACTIVE GOALS" not in prompt
+    assert "ACTIVE GOALS (highest priority first):" not in prompt
 
 
 def test_builder_renders_target_date_when_present() -> None:
