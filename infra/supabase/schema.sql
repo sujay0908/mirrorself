@@ -130,3 +130,41 @@ CREATE INDEX IF NOT EXISTS ix_memory_candidates_twin_id
     ON memory_candidates(twin_id);
 CREATE INDEX IF NOT EXISTS ix_memory_candidates_twin_status_created
     ON memory_candidates(twin_id, status, created_at DESC);
+
+-- Sprint 4: goals + goal_events
+-- Mirror of alembic/versions/0004_goals.py so this file stays a
+-- human-readable view of every table policies.sql references. Apply
+-- migrations via alembic in prod; schema.sql is not the source of truth.
+
+CREATE TABLE IF NOT EXISTS goals (
+    id                 UUID PRIMARY KEY,
+    user_id            UUID NOT NULL,
+    twin_id            UUID NOT NULL REFERENCES twins(id) ON DELETE CASCADE,
+    title              VARCHAR(200) NOT NULL,
+    description        TEXT,
+    target_date        TIMESTAMPTZ,
+    priority           INTEGER NOT NULL DEFAULT 3
+                           CHECK (priority >= 1 AND priority <= 5),
+    status             VARCHAR(16) NOT NULL DEFAULT 'active'
+                           CHECK (status IN ('active','achieved','abandoned','paused')),
+    status_changed_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    metadata_json      JSON NOT NULL DEFAULT '{}'::json,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_goals_user_id ON goals(user_id);
+CREATE INDEX IF NOT EXISTS ix_goals_twin_id ON goals(twin_id);
+CREATE INDEX IF NOT EXISTS ix_goals_twin_status
+    ON goals(twin_id, status);
+
+CREATE TABLE IF NOT EXISTS goal_events (
+    id           UUID PRIMARY KEY,
+    goal_id      UUID NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+    event_type   VARCHAR(32) NOT NULL
+                     CHECK (event_type IN ('created','updated','status_changed')),
+    from_status  VARCHAR(16),
+    to_status    VARCHAR(16),
+    note         TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_goal_events_goal_id ON goal_events(goal_id);
