@@ -91,7 +91,7 @@ class TwinContext:
     # goal_provenance_map: short_id → full goal_id. Not sent to the LLM.
     goal_provenance_map: dict[str, str] = field(default_factory=dict)
 
-    def to_system_prompt(self) -> str:
+    def to_system_prompt(self, twin_state: object | None = None) -> str:
         """Render the context as a system prompt string.
 
         Sprint 5 moved the actual rendering into
@@ -99,16 +99,21 @@ class TwinContext:
         context object stays separate from the string it eventually
         becomes. This method is kept as a thin adapter so the pipeline,
         tests, and any other callers that already invoke it do not need
-        to change. The renderer is deterministic and pure; see the
-        module docstring on `app.conversation.prompt` for the rules it
-        enforces (no internal ids, no similarity scores, explicit
-        anti-fabrication guardrails).
+        to change.
+
+        Sprint 6 added an optional `twin_state` argument (session-local
+        intent + policy); when passed, the renderer adds a short
+        "what this turn is about" hint to the identity block. The
+        parameter is typed `object | None` here instead of
+        `TwinState | None` to avoid an import cycle between
+        `app.conversation.state` → `app.conversation.policy` →
+        `app.memory.context` → `app.conversation.state`. The renderer
+        itself does the proper type-check at TYPE_CHECKING time.
         """
-        # Local import keeps the import graph acyclic: `prompt.py` only
-        # type-imports `TwinContext`.
+        # Local import keeps the import graph acyclic.
         from app.conversation.prompt import render_system_prompt
 
-        return render_system_prompt(self)
+        return render_system_prompt(self, twin_state=twin_state)  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,15 +142,20 @@ class ContextBuilder:
         retrieved: list[RetrievedMemory],
         recent_messages: list[Message],
         active_goals: list[Goal] | None = None,
+        budget: ContextBudget | None = None,
     ) -> TwinContext:
+        # Sprint 6: callers can pass a per-call budget derived from the
+        # resolved context policy. When omitted we fall back to the
+        # builder's own default (Sprint 3+4 behaviour).
+        effective = budget or self._budget
         memories: list[ContextMemoryEntry] = []
         provenance: dict[str, str] = {}
-        for retrieved_memory in retrieved[: self._budget.max_memories]:
+        for retrieved_memory in retrieved[: effective.max_memories]:
             full_id = str(retrieved_memory.memory.id)
             short = _short_id(full_id)
             content = retrieved_memory.memory.content
-            if len(content) > self._budget.max_memory_content_chars:
-                content = content[: self._budget.max_memory_content_chars] + "…"
+            if len(content) > effective.max_memory_content_chars:
+                content = content[: effective.max_memory_content_chars] + "…"
             memories.append(
                 ContextMemoryEntry(
                     short_id=short,
@@ -164,18 +174,15 @@ class ContextBuilder:
         # ever gates chat on goals.
         goal_entries: list[ContextGoalEntry] = []
         goal_provenance: dict[str, str] = {}
-        for goal in (active_goals or [])[: self._budget.max_active_goals]:
+        for goal in (active_goals or [])[: effective.max_active_goals]:
             full_id = str(goal.id)
             short = _short_id(full_id)
             title = goal.title
-            if len(title) > self._budget.max_goal_title_chars:
-                title = title[: self._budget.max_goal_title_chars] + "…"
+            if len(title) > effective.max_goal_title_chars:
+                title = title[: effective.max_goal_title_chars] + "…"
             description = goal.description
-            if (
-                description is not None
-                and len(description) > self._budget.max_goal_description_chars
-            ):
-                description = description[: self._budget.max_goal_description_chars] + "…"
+            if description is not None and len(description) > effective.max_goal_description_chars:
+                description = description[: effective.max_goal_description_chars] + "…"
             goal_entries.append(
                 ContextGoalEntry(
                     short_id=short,
@@ -191,13 +198,13 @@ class ContextBuilder:
         # Recent turns in chronological order, bounded, excluding system
         # messages which are already synthesised by the system prompt.
         bounded_messages = [m for m in recent_messages if m.role in ("user", "twin")][
-            -self._budget.max_history_turns :
+            -effective.max_history_turns :
         ]
         turns: list[ContextTurn] = []
         for m in bounded_messages:
             content = m.content
-            if len(content) > self._budget.max_turn_content_chars:
-                content = content[: self._budget.max_turn_content_chars] + "…"
+            if len(content) > effective.max_turn_content_chars:
+                content = content[: effective.max_turn_content_chars] + "…"
             turns.append(ContextTurn(role=m.role, content=content))
 
         profile = twin.profile

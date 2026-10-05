@@ -362,7 +362,13 @@ async def test_prompt_does_not_leak_another_users_memory(client, as_user, user_a
 @pytest.mark.asyncio
 async def test_prompt_respects_active_goal_cap(client) -> None:
     """Section 10 + 11(7): more active goals than the budget allows →
-    only the top three appear in the prompt."""
+    only the top three appear in the prompt.
+
+    Sprint 6 note: the per-prompt goal count is now
+    `policy.goal_limit`, which depends on intent. This test uses a
+    PLAN-triggering message so the policy ceiling is 3 — the same
+    ceiling the Sprint 4 cap-at-3 invariant enforces.
+    """
     await _create_twin(client)
     conv_id = await _create_conversation(client)
     for i in range(5):
@@ -373,7 +379,7 @@ async def test_prompt_respects_active_goal_cap(client) -> None:
     try:
         resp = await client.post(
             f"/v1/conversations/{conv_id}/messages",
-            json={"content": "hi"},
+            json={"content": "Let's plan my next steps."},
         )
         assert resp.status_code == 201
     finally:

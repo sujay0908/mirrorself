@@ -17,6 +17,7 @@ from app.auth.supabase import verify_supabase_jwt
 from app.common.errors import UnauthorizedError
 from app.common.tasks import FastAPIBackgroundRunner, TaskRunner
 from app.config import Settings, get_settings
+from app.conversation.intent import DEFAULT_INTENT_DETECTOR, IntentDetector
 from app.conversation.service import ConversationService
 from app.db.session import get_db_session, get_sessionmaker
 from app.goal.service import GoalService
@@ -124,6 +125,20 @@ def goal_service_dep(session: DBSession) -> GoalService:
 GoalServiceDep = Annotated[GoalService, Depends(goal_service_dep)]
 
 
+def intent_detector_dep() -> IntentDetector:
+    """Sprint 6: the request-scoped `IntentDetector`.
+
+    Returns the deterministic rule-based detector by default. Tests
+    override this dependency to inject stub detectors (e.g. an
+    always-fails detector exercising the Sprint-6 failure-isolation
+    branch, or a canned-result detector pinning a specific intent).
+    """
+    return DEFAULT_INTENT_DETECTOR
+
+
+IntentDetectorDep = Annotated[IntentDetector, Depends(intent_detector_dep)]
+
+
 def conversation_service_dep(
     session: DBSession,
     provider: LLMProviderDep,
@@ -134,6 +149,7 @@ def conversation_service_dep(
     retriever: MemoryRetrieverDep,
     context_builder: ContextBuilderDep,
     goal_service: GoalServiceDep,
+    intent_detector: IntentDetectorDep,
 ) -> ConversationService:
     return ConversationService(
         session,
@@ -145,6 +161,7 @@ def conversation_service_dep(
         retriever=retriever,
         context_builder=context_builder,
         goal_service=goal_service,
+        intent_detector=intent_detector,
     )
 
 

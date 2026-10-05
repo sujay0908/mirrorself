@@ -1,4 +1,4 @@
-"""Prompt rendering for the Twin Engine (Sprint 5).
+"""Prompt rendering for the Twin Engine (Sprint 5, extended in Sprint 6).
 
 Separates the *structured* `TwinContext` domain object (what the Twin
 knows) from its *textual* representation (what the LLM sees). The
@@ -25,6 +25,12 @@ Rules enforced here:
 - **Pure function.** `render_system_prompt` is a pure function of its
   argument. Deterministic by construction so tests can pin the exact
   bytes.
+- **Sprint 6: optional intent block.** When a `TwinState` is passed in
+  the renderer emits one short line naming the detected intent (and no
+  confidence number — the LLM does not need to see a probability).
+  Business logic for choosing the intent lives in
+  `app/conversation/intent.py`; the renderer just plugs the resolved
+  value into the identity block.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from app.conversation.state import TwinState
     from app.memory.context import TwinContext
 
 
@@ -62,16 +69,46 @@ GUARDRAIL_LINES: tuple[str, ...] = (
 )
 
 
-def render_system_prompt(context: TwinContext) -> str:
+# Human-readable intent label per enum value. Rendered as plain English
+# so the LLM doesn't see internal tokens like THINK/PLAN that could leak
+# back into a reply. Kept here (not in `intent.py`) because this is
+# strictly a rendering concern — the domain enum values stay stable.
+_INTENT_LABEL: dict[str, str] = {
+    "THINK": "thinking out loud / weighing options",
+    "LEARN": "learning / asking for an explanation",
+    "PLAN": "planning or preparing",
+    "REFLECT": "reflecting on the past",
+    "TALK": "casual conversation",
+    "TASK": "asking you to produce or do something concrete",
+    "UNKNOWN": "unclear — treat as general conversation",
+}
+
+
+def render_system_prompt(
+    context: TwinContext,
+    twin_state: TwinState | None = None,
+) -> str:
     """Render the structured `TwinContext` into a system-prompt string.
 
-    Deterministic and purely a function of its input. Omits empty
+    Deterministic and purely a function of its inputs. Omits empty
     sections so a brand-new user without memories or goals does not get
     an "ACTIVE GOALS:\n(none)" ghost section.
+
+    When a `TwinState` is passed in, a one-line "What this turn is
+    about:" hint is added right after the identity block. The hint
+    carries only the English label for the intent — never the raw
+    enum name, never the confidence number, never the detector's
+    `reason` tag — so the LLM can't echo any internal scaffolding.
     """
     lines: list[str] = []
     lines.append(f"{IDENTITY_LINES[0]} (twin display name: {context.twin_display_name}.)")
     lines.append(IDENTITY_LINES[1])
+    if twin_state is not None:
+        label = _INTENT_LABEL.get(
+            twin_state.intent_result.intent.value,
+            _INTENT_LABEL["UNKNOWN"],
+        )
+        lines.append(f"What this turn is about: {label}.")
     lines.append(f"Communication style preset: {context.communication_style_preset}.")
 
     if context.communication_style_notes:
