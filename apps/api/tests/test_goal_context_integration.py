@@ -58,18 +58,30 @@ async def test_only_active_goals_reach_context(client) -> None:
 
 @pytest.mark.asyncio
 async def test_active_goals_capped_at_three(client) -> None:
+    """Hard cap of 3 active goals per prompt (DF8).
+
+    Sprint 6 makes the goal-limit depend on intent. This test uses a
+    PLAN-triggering message ("Let's plan the next steps") so the
+    deterministic detector resolves to Intent.PLAN with goals=HIGH,
+    which maps to the policy limit of 3 — the same ceiling the cap-at-3
+    invariant has always enforced.
+    """
     conv_id = await _create_twin_and_conversation(client)
 
     for i in range(5):
         await _create_goal(client, title=f"Goal {i}", priority=3)
 
-    body = await _post_message(client, conv_id, "What should I focus on?")
+    body = await _post_message(client, conv_id, "Let's plan the next steps.")
     goals_meta = body["twin_message"]["metadata_json"]["goals_context"]
     assert goals_meta["goals_used"] == 3
 
 
 @pytest.mark.asyncio
 async def test_goals_ordered_by_priority_then_recency(client) -> None:
+    """Priority-then-recency ordering survives the Sprint 6 policy. Uses
+    the same PLAN-triggering phrasing so the goal_limit is 3 and all
+    three highest-priority goals are included.
+    """
     conv_id = await _create_twin_and_conversation(client)
 
     low = await _create_goal(client, title="low", priority=5)
@@ -77,7 +89,7 @@ async def test_goals_ordered_by_priority_then_recency(client) -> None:
     mid = await _create_goal(client, title="mid", priority=3)
     high_new = await _create_goal(client, title="high-new", priority=1)
 
-    body = await _post_message(client, conv_id, "What is top?")
+    body = await _post_message(client, conv_id, "Help me plan this out.")
     ids_in_order = body["twin_message"]["metadata_json"]["goals_context"]["goal_ids"]
     # Priority asc wins first; among same priority newest-updated wins.
     assert ids_in_order == [high_new, high_old, mid]

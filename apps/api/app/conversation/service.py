@@ -28,9 +28,18 @@ from sqlalchemy.orm import selectinload
 
 from app.common.errors import NotFoundError
 from app.common.tasks import TaskRunner
+from app.conversation.intent import (
+    DEFAULT_INTENT_DETECTOR,
+    Intent,
+    IntentDetector,
+    IntentResult,
+    detect_intent_safely,
+)
 from app.conversation.models import Conversation, Message
 from app.conversation.pipeline import run_pipeline
+from app.conversation.policy import ContextPolicy, policy_for
 from app.conversation.schemas import ConversationCreateIn
+from app.conversation.state import TwinState
 from app.goal.models import Goal
 from app.goal.service import GoalService
 from app.llm.interface import LLMProvider
@@ -65,6 +74,7 @@ class ConversationService:
         retriever: MemoryRetriever | None = None,
         context_builder: ContextBuilder | None = None,
         goal_service: GoalService | None = None,
+        intent_detector: IntentDetector | None = None,
     ) -> None:
         self._session = session
         self._provider = provider
@@ -75,6 +85,7 @@ class ConversationService:
         self._retriever = retriever
         self._context_builder = context_builder or ContextBuilder()
         self._goal_service = goal_service
+        self._intent_detector = intent_detector or DEFAULT_INTENT_DETECTOR
 
     async def list_for_twin(self, twin: Twin) -> list[Conversation]:
         stmt = (
@@ -144,26 +155,47 @@ class ConversationService:
 
         history = [m for m in conv.messages if m.id != user_msg.id]
 
+        # Sprint 6: intent detection and context policy FIRST. The
+        # resolved policy drives the retriever's `limit`, the goal
+        # service's `limit`, and the ContextBuilder's budget — so a
+        # casual TALK pulls fewer memories than a deep REFLECT, without
+        # any downstream code learning about intents.
+        intent_result = await self._detect_intent_safely(
+            user_message=content,
+            conversation_id=conv.id,
+            twin=twin,
+        )
+        policy = self._policy_for_intent_safely(
+            intent_result=intent_result,
+            conversation_id=conv.id,
+            twin=twin,
+        )
+        twin_state = TwinState(intent_result=intent_result, policy=policy)
+
         retrieval = await self._retrieve_safely(
             twin=twin,
             query_text=content,
             conversation_id=conv.id,
+            limit=policy.memory_limit,
         )
         active_goals, goals_ok, goals_error = await self._load_active_goals_safely(
             twin=twin,
             conversation_id=conv.id,
+            limit=policy.goal_limit,
         )
         twin_context: TwinContext = self._context_builder.build(
             twin=twin,
             retrieved=retrieval.items,
             recent_messages=history,
             active_goals=active_goals,
+            budget=policy.context_budget(),
         )
 
         response = await run_pipeline(
             context=twin_context,
             user_message_content=content,
             provider=self._provider,
+            twin_state=twin_state,
         )
 
         twin_msg = Message(
@@ -188,6 +220,7 @@ class ConversationService:
                     "goals_used": len(active_goals),
                     "goal_ids": [str(g.id) for g in active_goals],
                 },
+                "twin_state": twin_state.to_metadata(),
             },
         )
         self._session.add(twin_msg)
@@ -209,6 +242,12 @@ class ConversationService:
             memories_used=len(retrieval.items),
             goals_ok=goals_ok,
             goals_used=len(active_goals),
+            intent=intent_result.intent.value,
+            intent_confidence=intent_result.confidence,
+            intent_reason=intent_result.reason,
+            memory_limit=policy.memory_limit,
+            goal_limit=policy.goal_limit,
+            history_turns=policy.history_turns,
         )
 
         self._enqueue_memory_extraction(
@@ -220,18 +259,89 @@ class ConversationService:
 
         return user_msg, twin_msg
 
+    async def _detect_intent_safely(
+        self,
+        *,
+        user_message: str,
+        conversation_id: uuid.UUID,
+        twin: Twin,
+    ) -> IntentResult:
+        """Run the intent detector; absorb any failure.
+
+        Sprint 6: intent-detection failure MUST NOT fail chat. The
+        detector itself already never raises (see
+        `app.conversation.intent.detect_intent_safely`); this method
+        adds a second belt-and-braces try/except so a future
+        contributor who accidentally relaxes that invariant does not
+        break the chat path. On any failure we return UNKNOWN.
+        """
+        try:
+            result = await detect_intent_safely(self._intent_detector, user_message)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "intent.detection.unhandled",
+                error=type(exc).__name__,
+                conversation_id=str(conversation_id),
+                twin_id=str(twin.id),
+            )
+            return IntentResult(
+                intent=Intent.UNKNOWN,
+                confidence=0.0,
+                reason=f"unhandled:{type(exc).__name__}",
+            )
+        if result.intent is Intent.UNKNOWN:
+            logger.info(
+                "intent.detection.unknown",
+                reason=result.reason,
+                conversation_id=str(conversation_id),
+                twin_id=str(twin.id),
+            )
+        return result
+
+    def _policy_for_intent_safely(
+        self,
+        *,
+        intent_result: IntentResult,
+        conversation_id: uuid.UUID,
+        twin: Twin,
+    ) -> ContextPolicy:
+        """Resolve the context policy; absorb any failure.
+
+        Sprint 6: context-policy failure MUST NOT fail chat. The
+        `policy_for` function itself is pure and never raises today,
+        but keep the wrapping so a future tweak that reads config or
+        a DB cannot regress the invariant.
+        """
+        try:
+            return policy_for(intent_result.intent)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "intent.policy.unhandled",
+                error=type(exc).__name__,
+                conversation_id=str(conversation_id),
+                twin_id=str(twin.id),
+            )
+            return policy_for(Intent.UNKNOWN)
+
     async def _retrieve_safely(
         self,
         *,
         twin: Twin,
         query_text: str,
         conversation_id: uuid.UUID,
+        limit: int,
     ) -> RetrievalResult:
         """Call the retriever and absorb any failure.
 
         The retriever ITSELF never raises (it catches internally and sets
         `error`). This method adds a second belt-and-braces try/except in
         case a future contributor accidentally changes that invariant.
+
+        Sprint 6: `limit` is passed in by the caller based on the
+        resolved `ContextPolicy`. A `limit` of 0 means the policy
+        decided no memories should be retrieved for this intent — we
+        short-circuit to an empty success result rather than calling
+        the retriever at all.
         """
         if self._retriever is None:
             logger.info(
@@ -241,8 +351,16 @@ class ConversationService:
                 twin_id=str(twin.id),
             )
             return RetrievalResult(metadata={"skipped": True, "reason": "retriever_not_wired"})
+        if limit <= 0:
+            logger.info(
+                "memory.retrieval.skipped",
+                reason="policy_memory_zero",
+                conversation_id=str(conversation_id),
+                twin_id=str(twin.id),
+            )
+            return RetrievalResult(metadata={"skipped": True, "reason": "policy_memory_zero"})
         try:
-            result = await self._retriever.retrieve(twin, query_text)
+            result = await self._retriever.retrieve(twin, query_text, limit=limit)
         except Exception as exc:
             logger.warning(
                 "memory.retrieval.unhandled",
@@ -272,12 +390,18 @@ class ConversationService:
         *,
         twin: Twin,
         conversation_id: uuid.UUID,
+        limit: int,
     ) -> tuple[list[Goal], bool, str | None]:
         """Load active goals for the TwinContext; never fail chat on error.
 
         Returns (goals, ok, error). An empty list + ok=True is the common
         path (no goals yet). An empty list + ok=False means loading failed
         and the chat continues without goal context.
+
+        Sprint 6: `limit` is passed in by the caller based on the
+        resolved `ContextPolicy`. A `limit` of 0 means the policy
+        decided no goals should be included for this intent — we
+        short-circuit to an empty success result.
         """
         if self._goal_service is None:
             logger.info(
@@ -287,10 +411,16 @@ class ConversationService:
                 twin_id=str(twin.id),
             )
             return [], True, None
-        try:
-            goals = await self._goal_service.list_active_for_context(
-                twin, limit=self._MAX_ACTIVE_GOALS_IN_CONTEXT
+        if limit <= 0:
+            logger.info(
+                "goals.context.skipped",
+                reason="policy_goals_zero",
+                conversation_id=str(conversation_id),
+                twin_id=str(twin.id),
             )
+            return [], True, None
+        try:
+            goals = await self._goal_service.list_active_for_context(twin, limit=limit)
             return list(goals), True, None
         except Exception as exc:
             logger.warning(
