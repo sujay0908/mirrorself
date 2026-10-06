@@ -179,3 +179,29 @@ CREATE POLICY reflection_candidates_owner ON reflection_candidates
     FOR ALL
     USING (twin_id IN (SELECT id FROM twins WHERE user_id = auth.uid()))
     WITH CHECK (twin_id IN (SELECT id FROM twins WHERE user_id = auth.uid()));
+
+-- ================================================================
+-- Sprint 8: Evolving Twin Loop RLS
+-- ================================================================
+--
+-- Both tables are owned directly via `twin_id`. The write path is
+-- server-side (service role in production) — the RLS policies here are
+-- the second line of defence that keeps a direct REST/Realtime read
+-- scoped per user. `memories.confirmed_at` and
+-- `twins.last_reflection_run_at` are columns on existing tables and
+-- are covered by the existing `memories_owner` / `twins_owner_*`
+-- policies.
+
+ALTER TABLE twin_evolution_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS twin_evolution_events_owner ON twin_evolution_events;
+CREATE POLICY twin_evolution_events_owner ON twin_evolution_events
+    FOR ALL
+    USING (twin_id IN (SELECT id FROM twins WHERE user_id = auth.uid()))
+    WITH CHECK (twin_id IN (SELECT id FROM twins WHERE user_id = auth.uid()));
+
+ALTER TABLE intent_telemetry_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS intent_telemetry_events_owner ON intent_telemetry_events;
+CREATE POLICY intent_telemetry_events_owner ON intent_telemetry_events
+    FOR ALL
+    USING (twin_id IN (SELECT id FROM twins WHERE user_id = auth.uid()))
+    WITH CHECK (twin_id IN (SELECT id FROM twins WHERE user_id = auth.uid()));

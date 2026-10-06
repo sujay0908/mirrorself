@@ -313,3 +313,37 @@ export interface ReflectionRunOut {
   candidates_deduplicated: number;
   error: string | null;
 }
+
+// ---------- Twin evolution (Sprint 8) ----------
+//
+// Evolution events record durable, user-authorized changes that
+// actually took effect. The mobile UI uses the event_type to pick
+// copy — `profile_confirmed`/`memory_learned`/`memory_consolidated`/
+// `goal_updated` all phrase as "Your Twin learned…", while
+// `insight_acknowledged` phrases as "You acknowledged…" to preserve
+// the Sprint 7 founder decision that an insight is NOT identity
+// mutation.
+
+export type EvolutionEventType =
+  | 'memory_learned'
+  | 'memory_consolidated'
+  | 'goal_updated'
+  | 'profile_confirmed'
+  | 'insight_acknowledged';
+
+export interface EvolutionEvent {
+  id: UUID;
+  user_id: UUID;
+  twin_id: UUID;
+  event_type: EvolutionEventType;
+  reflection_id: UUID | null;
+  memory_id: UUID | null;
+  goal_id: UUID | null;
+  profile_field: string | null;
+  summary: string;
+  created_at: ISODateTime;
+}
+
+export interface EvolutionListOut {
+  items: EvolutionEvent[];
+}

@@ -20,6 +20,7 @@ Two hard invariants (Sprint 3 architectural rules F + E):
 
 from __future__ import annotations
 
+import time
 import uuid
 
 from sqlalchemy import select
@@ -28,6 +29,7 @@ from sqlalchemy.orm import selectinload
 
 from app.common.errors import NotFoundError
 from app.common.tasks import TaskRunner
+from app.config import Settings
 from app.conversation.intent import (
     DEFAULT_INTENT_DETECTOR,
     Intent,
@@ -47,6 +49,9 @@ from app.memory.context import ContextBuilder, TwinContext
 from app.memory.retrieval import MemoryRetriever, RetrievalResult
 from app.memory.tasks import extract_memory_candidates_task
 from app.observability.logging import get_logger
+from app.reflection.tasks import scheduled_reflection_task
+from app.telemetry.service import length_bucket
+from app.telemetry.tasks import record_intent_telemetry_task
 from app.twin.models import Twin
 
 logger = get_logger(__name__)
@@ -75,6 +80,7 @@ class ConversationService:
         context_builder: ContextBuilder | None = None,
         goal_service: GoalService | None = None,
         intent_detector: IntentDetector | None = None,
+        settings: Settings | None = None,
     ) -> None:
         self._session = session
         self._provider = provider
@@ -86,6 +92,12 @@ class ConversationService:
         self._context_builder = context_builder or ContextBuilder()
         self._goal_service = goal_service
         self._intent_detector = intent_detector or DEFAULT_INTENT_DETECTOR
+        # Sprint 8: settings pass-through so the scheduled reflection
+        # task can read opportunity thresholds. Nullable — tests that
+        # construct the service directly without a settings instance
+        # keep working; the scheduler is only enqueued when settings
+        # AND sessionmaker AND task_runner are all wired.
+        self._settings = settings
 
     async def list_for_twin(self, twin: Twin) -> list[Conversation]:
         stmt = (
@@ -160,11 +172,13 @@ class ConversationService:
         # service's `limit`, and the ContextBuilder's budget — so a
         # casual TALK pulls fewer memories than a deep REFLECT, without
         # any downstream code learning about intents.
+        intent_t0 = time.perf_counter()
         intent_result = await self._detect_intent_safely(
             user_message=content,
             conversation_id=conv.id,
             twin=twin,
         )
+        intent_latency_ms = int((time.perf_counter() - intent_t0) * 1000)
         policy = self._policy_for_intent_safely(
             intent_result=intent_result,
             conversation_id=conv.id,
@@ -256,6 +270,19 @@ class ConversationService:
             user_message_id=user_msg.id,
             twin_message_id=twin_msg.id,
         )
+        # Sprint 8: intent telemetry — SAFE-METADATA-ONLY row. The
+        # length bucket is computed HERE so the task coroutine never
+        # sees the raw user message.
+        self._enqueue_intent_telemetry(
+            twin=twin,
+            user_message=content,
+            intent_result=intent_result,
+            intent_latency_ms=intent_latency_ms,
+        )
+        # Sprint 8: reflection scheduler. Runs AFTER the chat response
+        # has been persisted. Policy almost always returns SKIP; even
+        # when it runs, exceptions are swallowed so chat is unaffected.
+        self._enqueue_reflection_scheduler(twin=twin)
 
         return user_msg, twin_msg
 
@@ -456,4 +483,58 @@ class ConversationService:
             conversation_id=conversation_id,
             user_message_id=user_message_id,
             twin_message_id=twin_message_id,
+        )
+
+    def _enqueue_intent_telemetry(
+        self,
+        *,
+        twin: Twin,
+        user_message: str,
+        intent_result: IntentResult,
+        intent_latency_ms: int,
+    ) -> None:
+        """Sprint 8: enqueue a telemetry row for the detected intent.
+
+        The length bucket is computed HERE so the raw user message is
+        NOT passed to the task coroutine. The task writes only
+        safe-metadata fields. Failure is isolated.
+        """
+        if self._task_runner is None or self._sessionmaker is None:
+            return
+        bucket = length_bucket(user_message)
+        detector_name = getattr(self._intent_detector, "detector_name", "unknown")
+        self._task_runner.enqueue(
+            record_intent_telemetry_task,
+            sessionmaker=self._sessionmaker,
+            user_id=twin.user_id,
+            twin_id=twin.id,
+            intent=intent_result.intent.value,
+            confidence=float(intent_result.confidence),
+            reason=intent_result.reason,
+            detector_name=detector_name,
+            latency_ms=intent_latency_ms,
+            message_length_bucket=bucket,
+        )
+
+    def _enqueue_reflection_scheduler(self, *, twin: Twin) -> None:
+        """Sprint 8: enqueue the reflection scheduler for this twin.
+
+        No-op when the service is not wired for background work (unit
+        tests that construct ConversationService without a runner).
+        """
+        if (
+            self._task_runner is None
+            or self._sessionmaker is None
+            or self._llm_model is None
+            or self._settings is None
+        ):
+            return
+        self._task_runner.enqueue(
+            scheduled_reflection_task,
+            sessionmaker=self._sessionmaker,
+            llm_provider=self._provider,
+            llm_model=self._llm_model,
+            user_id=twin.user_id,
+            twin_id=twin.id,
+            settings=self._settings,
         )

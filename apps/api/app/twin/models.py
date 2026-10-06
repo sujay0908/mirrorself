@@ -9,9 +9,10 @@ originating from memory pass through a confirmation loop (Sprint 2+).
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, ForeignKey, String, Text, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
@@ -28,6 +29,17 @@ class Twin(Base, UUIDPKMixin, TimestampMixin):
         Uuid(as_uuid=True), unique=True, index=True, nullable=False
     )
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # Sprint 8: the moment a reflection run last SUCCEEDED for this twin
+    # (either produced candidates or came back cleanly empty). The
+    # reflection opportunity policy uses this to count "new confirmed
+    # memories since the last run" and to enforce the cooldown. NULL
+    # until the first successful run; the scheduler writes it inside the
+    # same transaction as `ReflectionService.create_candidates` so a
+    # failed run never advances it. Never touched by `/v1/reflections/run`
+    # error paths. See docs/architecture/evolving-twin-loop.md.
+    last_reflection_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     profile: Mapped[TwinProfile] = relationship(
         back_populates="twin",

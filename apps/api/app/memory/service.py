@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.conversation.models import Message
+from app.evolution.service import EvolutionService
 from app.llm.interface import EmbeddingProvider, EmbeddingRequest
 from app.memory.errors import (
     MemoryCandidateAlreadyResolvedError,
@@ -55,9 +56,16 @@ class MemoryService:
         self,
         session: AsyncSession,
         embedding_provider: EmbeddingProvider | None = None,
+        *,
+        evolution_service: EvolutionService | None = None,
     ) -> None:
         self._session = session
         self._embedding_provider = embedding_provider
+        # Sprint 8: optional writer for `twin_evolution_events`. Kept
+        # optional so Sprint 2 callers that construct MemoryService
+        # directly (tests, scripts) still work without the Sprint 8
+        # dependency graph. The HTTP layer wires it unconditionally.
+        self._evolution_service = evolution_service
 
     # ------------- Memory CRUD -------------
 
@@ -322,6 +330,11 @@ class MemoryService:
             importance=candidate.importance,
             user_confirmed=True,
             last_confirmed_at=now,
+            # Sprint 8 (Decision 2): the IMMUTABLE moment this candidate
+            # became a durable Memory. `last_confirmed_at` can advance
+            # on user edits; `confirmed_at` must not. The reflection
+            # opportunity policy relies on this column.
+            confirmed_at=now,
             metadata_json={"candidate_id": str(candidate.id)},
         )
         self._session.add(memory)
@@ -338,6 +351,20 @@ class MemoryService:
 
         candidate.status = "confirmed"
         candidate.resulting_memory_id = memory.id
+
+        # Sprint 8: record Twin evolution event in the SAME transaction
+        # as the memory + source rows. If the commit below fails, no
+        # evolution event lands either. The service is optional so
+        # Sprint 2 callers that construct MemoryService without one
+        # keep working.
+        if self._evolution_service is not None:
+            # Lazy import avoided: EvolutionService was injected at init.
+            await self._evolution_service.record(
+                twin,
+                event_type="memory_learned",
+                summary=f"{candidate.type} memory learned via confirmed candidate",
+                memory_id=memory.id,
+            )
 
         # COMMIT NOW — the memory and its provenance are permanent at this
         # point. The embedding attach below runs on a separate transaction

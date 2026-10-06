@@ -14,11 +14,10 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Query, status
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
     CurrentUser,
+    EvolutionServiceDep,
     LLMProviderDep,
     MemoryRetrieverDep,
     MemoryServiceDep,
@@ -27,8 +26,15 @@ from app.api.deps import (
     SettingsDep,
     TwinServiceDep,
 )
-from app.conversation.models import Message
-from app.memory.models import Memory
+from app.reflection.scheduler import (
+    load_active_goals as _load_active_goals,
+)
+from app.reflection.scheduler import (
+    load_recent_memories as _load_recent_memories,
+)
+from app.reflection.scheduler import (
+    load_recent_turns as _load_recent_turns,
+)
 from app.reflection.schemas import (
     ReflectionConfirmOut,
     ReflectionListOut,
@@ -36,7 +42,6 @@ from app.reflection.schemas import (
     ReflectionRunOut,
     ReflectionStatus,
 )
-from app.twin.models import Twin
 
 router = APIRouter()
 
@@ -71,6 +76,7 @@ async def confirm_reflection(
     twins: TwinServiceDep,
     reflections: ReflectionServiceDep,
     memories: MemoryServiceDep,
+    evolution: EvolutionServiceDep,
 ) -> ReflectionConfirmOut:
     twin = await twins.require_by_user(user.user_id)
     candidate, applied, apply_metadata = await reflections.confirm(
@@ -78,6 +84,7 @@ async def confirm_reflection(
         reflection_id,
         twin_service=twins,
         memory_service=memories,
+        evolution_service=evolution,
     )
     return ReflectionConfirmOut(
         reflection=ReflectionOut.model_validate(candidate),
@@ -164,69 +171,6 @@ async def run_reflection(
     )
 
 
-# ---------------------------------------------------------------------
-# Reflection-run input loaders — bounded, owner-scoped
-# ---------------------------------------------------------------------
-
-
-async def _load_recent_memories(
-    session: AsyncSession, twin: Twin, *, limit: int
-) -> list[tuple[uuid.UUID, str, str]]:
-    """Load up to `limit` confirmed, non-superseded memories, newest first."""
-    stmt = (
-        select(Memory)
-        .where(
-            Memory.twin_id == twin.id,
-            Memory.user_id == twin.user_id,
-            Memory.user_confirmed.is_(True),
-            Memory.superseded_by_memory_id.is_(None),
-        )
-        .order_by(Memory.created_at.desc())
-        .limit(limit)
-    )
-    rows = (await session.execute(stmt)).scalars().all()
-    return [(m.id, m.type, m.content) for m in rows]
-
-
-async def _load_active_goals(
-    session: AsyncSession, twin: Twin, *, limit: int
-) -> list[tuple[uuid.UUID, str, str | None, int, str]]:
-    """Load up to `limit` active goals, highest-priority first."""
-    from app.goal.models import Goal
-
-    stmt = (
-        select(Goal)
-        .where(
-            Goal.twin_id == twin.id,
-            Goal.user_id == twin.user_id,
-            Goal.status == "active",
-        )
-        .order_by(Goal.priority.asc(), Goal.updated_at.desc(), Goal.id.asc())
-        .limit(limit)
-    )
-    rows = (await session.execute(stmt)).scalars().all()
-    return [(g.id, g.title, g.description, g.priority, g.status) for g in rows]
-
-
-async def _load_recent_turns(
-    session: AsyncSession, twin: Twin, *, limit: int
-) -> list[tuple[str, str]]:
-    """Load up to `limit` recent user/twin messages across any
-    conversation owned by this twin, newest first.
-    """
-    from app.conversation.models import Conversation
-
-    stmt = (
-        select(Message)
-        .join(Conversation, Conversation.id == Message.conversation_id)
-        .where(
-            Conversation.twin_id == twin.id,
-            Message.role.in_(("user", "twin")),
-        )
-        .order_by(Message.created_at.desc())
-        .limit(limit)
-    )
-    rows = (await session.execute(stmt)).scalars().all()
-    # Return in chronological order (oldest → newest) so the extractor
-    # reads it the natural way.
-    return [(m.role, m.content) for m in reversed(rows)]
+# Loaders moved to `app.reflection.scheduler` in Sprint 8 so the manual
+# POST and the chat-time scheduler share one bounded, owner-scoped
+# implementation. Imported above under their Sprint 7 names.

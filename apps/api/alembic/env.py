@@ -18,9 +18,11 @@ from alembic import context
 from app.config import get_settings
 from app.conversation import models as _conv_models  # noqa: F401
 from app.db.base import Base
+from app.evolution import models as _evo_models  # noqa: F401
 from app.goal import models as _goal_models  # noqa: F401
 from app.memory import models as _mem_models  # noqa: F401
 from app.reflection import models as _refl_models  # noqa: F401
+from app.telemetry import models as _telemetry_models  # noqa: F401
 
 # Import all models so they are registered on Base.metadata before autogenerate.
 from app.twin import models as _twin_models  # noqa: F401
