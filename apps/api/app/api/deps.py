@@ -91,11 +91,28 @@ def twin_service_dep(session: DBSession) -> TwinService:
 TwinServiceDep = Annotated[TwinService, Depends(twin_service_dep)]
 
 
+def evolution_service_dep(session: DBSession) -> EvolutionService:
+    from app.evolution.service import EvolutionService
+
+    return EvolutionService(session)
+
+
+EvolutionServiceDep = Annotated["EvolutionService", Depends(evolution_service_dep)]
+
+
 def memory_service_dep(
     session: DBSession,
     embedding_provider: EmbeddingProviderDep,
+    evolution: EvolutionServiceDep,
 ) -> MemoryService:
-    return MemoryService(session, embedding_provider=embedding_provider)
+    # Sprint 8: pass the evolution writer so a confirmed memory
+    # candidate emits a `memory_learned` event inside the SAME
+    # transaction as the memory + source rows.
+    return MemoryService(
+        session,
+        embedding_provider=embedding_provider,
+        evolution_service=evolution,
+    )
 
 
 MemoryServiceDep = Annotated[MemoryService, Depends(memory_service_dep)]
@@ -162,6 +179,7 @@ def conversation_service_dep(
         context_builder=context_builder,
         goal_service=goal_service,
         intent_detector=intent_detector,
+        settings=settings,
     )
 
 
@@ -201,5 +219,6 @@ ReflectionExtractorDep = Annotated["ReflectionExtractor", Depends(reflection_ext
 
 # Imports kept at the bottom so the forward-referenced Annotated types
 # resolve at import time without introducing a cycle.
+from app.evolution.service import EvolutionService  # noqa: E402, F401
 from app.reflection.extractor import ReflectionExtractor  # noqa: E402, F401
 from app.reflection.service import ReflectionService  # noqa: E402, F401

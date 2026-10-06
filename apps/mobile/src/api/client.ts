@@ -8,6 +8,7 @@ import { config } from '@/config';
 import type {
   APIErrorBody,
   Conversation,
+  EvolutionListOut,
   Goal,
   GoalCreateIn,
   GoalEvent,
@@ -158,6 +159,13 @@ export const api = {
     request<ReflectionConfirmOut>('POST', `/reflections/${id}/confirm`),
   rejectReflection: (id: UUID) =>
     request<Reflection>('POST', `/reflections/${id}/reject`),
+
+  // Twin evolution (Sprint 8)
+  //
+  // Append-only read of durable changes that actually took effect.
+  // Rejected reflections do NOT appear here.
+  listEvolution: (limit = 50) =>
+    request<EvolutionListOut>('GET', `/twin/evolution?limit=${limit}`),
 };
 
 export type API = typeof api;

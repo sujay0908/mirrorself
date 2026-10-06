@@ -50,6 +50,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.evolution.service import EvolutionService
 from app.goal.models import Goal, GoalEvent
 from app.memory.service import MemoryService
 from app.observability.logging import get_logger
@@ -210,13 +211,19 @@ class ReflectionService:
         *,
         twin_service: TwinService,
         memory_service: MemoryService,
+        evolution_service: EvolutionService | None = None,
     ) -> tuple[ReflectionCandidate, bool, dict[str, Any]]:
         """Transition pending → confirmed and run the per-kind apply.
 
         The status change is committed BEFORE the apply runs so a
         duplicate confirmation request can never run the apply twice.
         If the apply itself fails, the candidate stays `confirmed`
-        with `apply_error` populated.
+        with `apply_error` populated AND no evolution event is written
+        (Decision 3: only confirmed-and-applied is evolution).
+
+        `evolution_service` is optional so Sprint 7 call sites that
+        construct a confirm pipeline without the Sprint 8 writer still
+        work; the HTTP endpoint always passes one.
         """
         candidate = await self._require_owned_candidate(twin, reflection_id)
         if candidate.status != "pending":
@@ -276,7 +283,80 @@ class ReflectionService:
             kind=candidate.kind,
             twin_id=str(twin.id),
         )
+
+        # Sprint 8 (Decision 3 + "ReflectionCandidate != EvolutionEvent"):
+        # evolution is written ONLY after a successful apply. A reject,
+        # a failed apply, or a pending candidate NEVER produces one.
+        if evolution_service is not None and applied:
+            await self._record_evolution_for(
+                twin,
+                candidate=candidate,
+                apply_metadata=apply_metadata,
+                evolution_service=evolution_service,
+            )
+            await self._session.commit()
         return candidate, applied, apply_metadata
+
+    async def _record_evolution_for(
+        self,
+        twin: Twin,
+        *,
+        candidate: ReflectionCandidate,
+        apply_metadata: dict[str, Any],
+        evolution_service: EvolutionService,
+    ) -> None:
+        """Translate a successfully-applied candidate into one evolution row.
+
+        Summaries are composed from IDs + the kind-of-change only — never
+        from stored content. The Sprint 7 insight contract says insight
+        confirmation is acknowledgement, not identity mutation: this
+        branch writes a distinct `insight_acknowledged` event type and
+        the mobile UI treats it as "You acknowledged…" rather than
+        "Your Twin learned…".
+        """
+        kind = candidate.kind
+        if kind == "profile_update":
+            field = str(apply_metadata.get("field") or "")
+            await evolution_service.record(
+                twin,
+                event_type="profile_confirmed",
+                summary=(
+                    f"profile.{field} updated via confirmed reflection"
+                    if field
+                    else "profile updated via confirmed reflection"
+                ),
+                reflection_id=candidate.id,
+                profile_field=field or None,
+            )
+            return
+        if kind == "memory_dedup":
+            superseded_id = apply_metadata.get("superseded_memory_id")
+            await evolution_service.record(
+                twin,
+                event_type="memory_consolidated",
+                summary="two memories consolidated via confirmed dedup",
+                reflection_id=candidate.id,
+                memory_id=(uuid.UUID(superseded_id) if isinstance(superseded_id, str) else None),
+            )
+            return
+        if kind == "goal_update":
+            goal_id = apply_metadata.get("goal_id")
+            await evolution_service.record(
+                twin,
+                event_type="goal_updated",
+                summary="goal note appended via confirmed reflection",
+                reflection_id=candidate.id,
+                goal_id=(uuid.UUID(goal_id) if isinstance(goal_id, str) else None),
+            )
+            return
+        if kind == "insight":
+            await evolution_service.record(
+                twin,
+                event_type="insight_acknowledged",
+                summary="insight acknowledged (no memory or profile change)",
+                reflection_id=candidate.id,
+            )
+            return
 
     async def reject(self, twin: Twin, reflection_id: uuid.UUID) -> ReflectionCandidate:
         candidate = await self._require_owned_candidate(twin, reflection_id)

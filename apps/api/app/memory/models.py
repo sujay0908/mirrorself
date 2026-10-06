@@ -93,6 +93,21 @@ class Memory(Base, UUIDPKMixin, TimestampMixin):
     last_confirmed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Sprint 8 (reflection opportunity policy): the IMMUTABLE timestamp
+    # of the moment a candidate was confirmed into a durable Memory. Set
+    # once at `MemoryService.confirm_candidate` and NEVER updated — a
+    # user edit (`last_confirmed_at`) or a Sprint-7 un-supersede does not
+    # touch it. The reflection opportunity policy counts "new memories
+    # since the last successful reflection run" with
+    # `confirmed_at > twin.last_reflection_run_at`, which is accurate
+    # even for a candidate created days before confirmation.
+    # Nullable so legacy rows (pre-Sprint-8) remain valid; the Sprint 8
+    # migration backfills via COALESCE(last_confirmed_at, created_at)
+    # for user_confirmed rows and leaves the rest NULL. See
+    # docs/architecture/evolving-twin-loop.md for the full lifecycle.
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     # Sprint 7: non-destructive memory dedup. When a confirmed
     # `memory_dedup` reflection candidate is applied, the superseded

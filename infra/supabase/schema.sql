@@ -5,11 +5,18 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS twins (
-    id            UUID PRIMARY KEY,
-    user_id       UUID NOT NULL UNIQUE,
-    display_name  VARCHAR(120) NOT NULL,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                      UUID PRIMARY KEY,
+    user_id                 UUID NOT NULL UNIQUE,
+    display_name            VARCHAR(120) NOT NULL,
+    -- Sprint 8: timestamp of the last SUCCESSFUL reflection run for
+    -- this twin. Written by `ReflectionScheduler.maybe_run` inside the
+    -- same transaction as `ReflectionService.create_candidates`. The
+    -- opportunity policy's "new memories since last run" and cooldown
+    -- clauses both read this column. NULL until the first successful
+    -- run.
+    last_reflection_run_at  TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_twins_user_id ON twins(user_id);
 
@@ -191,6 +198,14 @@ ALTER TABLE memories
 CREATE INDEX IF NOT EXISTS ix_memories_superseded_by_memory_id
     ON memories(superseded_by_memory_id);
 
+-- Sprint 8: immutable confirmation timestamp. Set once at
+-- candidate_confirm; the reflection opportunity policy counts
+-- "new confirmed memories since last run" against this column.
+ALTER TABLE memories
+    ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS ix_memories_confirmed_at
+    ON memories(confirmed_at);
+
 CREATE TABLE IF NOT EXISTS reflection_candidates (
     id                 UUID PRIMARY KEY,
     user_id            UUID NOT NULL,
@@ -223,3 +238,68 @@ CREATE INDEX IF NOT EXISTS ix_reflection_candidates_twin_status_created
     ON reflection_candidates(twin_id, status, created_at);
 CREATE INDEX IF NOT EXISTS ix_reflection_candidates_twin_fingerprint
     ON reflection_candidates(twin_id, status, fingerprint);
+
+-- ================================================================
+-- Sprint 8: Evolving Twin Loop — evolution events + intent telemetry
+-- Source of truth: apps/api/alembic/versions/0006_evolving_twin_loop.py
+-- ================================================================
+--
+-- `twin_evolution_events` records durable, user-authorized changes
+-- that actually took effect. Only written AFTER the matching apply
+-- succeeds. Rejected reflections do NOT create a row. The `summary`
+-- column is a short, derived string composed from IDs + the kind of
+-- change — it does NOT contain raw memory/goal/profile/message text.
+-- See docs/architecture/evolving-twin-loop.md.
+
+CREATE TABLE IF NOT EXISTS twin_evolution_events (
+    id              UUID PRIMARY KEY,
+    user_id         UUID NOT NULL,
+    twin_id         UUID NOT NULL REFERENCES twins(id) ON DELETE CASCADE,
+    event_type      VARCHAR(32) NOT NULL
+                        CHECK (event_type IN (
+                            'memory_learned','memory_consolidated',
+                            'goal_updated','profile_confirmed',
+                            'insight_acknowledged'
+                        )),
+    reflection_id   UUID REFERENCES reflection_candidates(id)
+                        ON DELETE SET NULL,
+    memory_id       UUID REFERENCES memories(id) ON DELETE SET NULL,
+    goal_id         UUID REFERENCES goals(id) ON DELETE SET NULL,
+    profile_field   VARCHAR(64),
+    summary         VARCHAR(255) NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_twin_evolution_events_user_id
+    ON twin_evolution_events(user_id);
+CREATE INDEX IF NOT EXISTS ix_twin_evolution_events_twin_id
+    ON twin_evolution_events(twin_id);
+CREATE INDEX IF NOT EXISTS ix_twin_evolution_events_twin_created
+    ON twin_evolution_events(twin_id, created_at);
+
+-- `intent_telemetry_events` — SAFE-METADATA-ONLY row. There is no
+-- content column, no message_id, no FK to any row that would let a
+-- reader recover the user's words. The intent telemetry sentinel test
+-- (`test_privacy_sentinel_never_appears_in_evolution_rows_or_logs`)
+-- asserts this. See docs/architecture/evolving-twin-loop.md.
+
+CREATE TABLE IF NOT EXISTS intent_telemetry_events (
+    id                      UUID PRIMARY KEY,
+    user_id                 UUID NOT NULL,
+    twin_id                 UUID NOT NULL REFERENCES twins(id) ON DELETE CASCADE,
+    intent                  VARCHAR(32) NOT NULL,
+    confidence              DOUBLE PRECISION NOT NULL
+                                CHECK (confidence >= 0 AND confidence <= 1),
+    reason                  VARCHAR(64) NOT NULL,
+    detector_name           VARCHAR(64) NOT NULL,
+    latency_ms              INTEGER NOT NULL DEFAULT 0,
+    message_length_bucket   VARCHAR(16) NOT NULL
+                                CHECK (message_length_bucket IN
+                                       ('short','medium','long')),
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_intent_telemetry_user_id
+    ON intent_telemetry_events(user_id);
+CREATE INDEX IF NOT EXISTS ix_intent_telemetry_twin_id
+    ON intent_telemetry_events(twin_id);
+CREATE INDEX IF NOT EXISTS ix_intent_telemetry_twin_created
+    ON intent_telemetry_events(twin_id, created_at);

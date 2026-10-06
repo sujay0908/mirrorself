@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     embedding_model: str = "mock-embed-1"
     embedding_dimensions: int = 1536
 
+    # ---- Reflection scheduler (Sprint 8 Evolving Twin Loop) ----
+    # These thresholds drive `OpportunityPolicy`. All four are
+    # intentionally conservative: they prefer SKIP over noisy
+    # reflections. See docs/architecture/evolving-twin-loop.md.
+    reflection_min_new_memories: int = 3
+    reflection_min_goal_events: int = 2
+    reflection_min_cooldown_seconds: int = 1800
+    reflection_max_pending_backlog: int = 10
+
     # ---- CORS ----
     cors_allow_origins: str = "http://localhost:8081,http://localhost:19006"
 

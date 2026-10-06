@@ -33,11 +33,13 @@ from app.auth.models import AuthenticatedUser
 from app.config import reset_settings_cache
 from app.conversation import models as _conv_models  # noqa: F401
 from app.db.base import Base
+from app.evolution import models as _evo_models  # noqa: F401
 from app.goal import models as _goal_models  # noqa: F401
 from app.llm.registry import reset_provider_cache
 from app.main import create_app
 from app.memory import models as _mem_models  # noqa: F401
 from app.reflection import models as _refl_models  # noqa: F401
+from app.telemetry import models as _telemetry_models  # noqa: F401
 
 # Import ORM models so they are attached to Base.metadata.
 from app.twin import models as _twin_models  # noqa: F401

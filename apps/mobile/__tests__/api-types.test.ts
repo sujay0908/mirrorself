@@ -9,6 +9,8 @@
  */
 
 import type {
+  EvolutionEvent,
+  EvolutionListOut,
   Goal,
   GoalEvent,
   GoalStatus,
@@ -161,6 +163,8 @@ type _ApiHas = Pick<
   | 'confirmReflection'
   | 'rejectReflection'
   | 'unsupersedeMemory'
+  // Sprint 8 evolution surface
+  | 'listEvolution'
 >;
 
 // If this reference compiles, every method above is present on `API`.
@@ -207,6 +211,39 @@ const _runOutSample: ReflectionRunOut = {
   error: null,
 };
 
+// Sprint 8: evolution event samples. profile_confirmed (identity
+// mutation, "learned") and insight_acknowledged (acknowledgement,
+// not identity mutation — rendered as "You acknowledged...").
+const _evolutionProfileSample: EvolutionEvent = {
+  id: '00000000-0000-0000-0000-000000000000',
+  user_id: '00000000-0000-0000-0000-000000000000',
+  twin_id: '00000000-0000-0000-0000-000000000000',
+  event_type: 'profile_confirmed',
+  reflection_id: '00000000-0000-0000-0000-000000000001',
+  memory_id: null,
+  goal_id: null,
+  profile_field: 'communication_style_notes',
+  summary: 'profile.communication_style_notes updated via confirmed reflection',
+  created_at: '2026-10-06T00:00:00Z',
+};
+
+const _evolutionInsightSample: EvolutionEvent = {
+  id: '00000000-0000-0000-0000-000000000002',
+  user_id: '00000000-0000-0000-0000-000000000000',
+  twin_id: '00000000-0000-0000-0000-000000000000',
+  event_type: 'insight_acknowledged',
+  reflection_id: '00000000-0000-0000-0000-000000000003',
+  memory_id: null,
+  goal_id: null,
+  profile_field: null,
+  summary: 'insight acknowledged (no memory or profile change)',
+  created_at: '2026-10-06T00:00:00Z',
+};
+
+const _evolutionListSample: EvolutionListOut = {
+  items: [_evolutionProfileSample, _evolutionInsightSample],
+};
+
 test('type smoke passes', () => {
   expect(_twinSample.display_name).toBe('Aurora');
   expect(_messageSample.role).toBe('twin');
@@ -227,4 +264,10 @@ test('type smoke passes', () => {
   }
   expect(_confirmOutSample.applied).toBe(true);
   expect(_runOutSample.candidates_proposed).toBe(2);
+  // Sprint 8: profile_confirmed → "learned"; insight_acknowledged
+  // → the distinct non-identity-mutation event. Both are present on
+  // the discriminated union.
+  expect(_evolutionProfileSample.event_type).toBe('profile_confirmed');
+  expect(_evolutionInsightSample.event_type).toBe('insight_acknowledged');
+  expect(_evolutionListSample.items).toHaveLength(2);
 });
