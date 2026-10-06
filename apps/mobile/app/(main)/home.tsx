@@ -69,6 +69,13 @@ export default function HomeScreen() {
           <Text style={styles.tileTitle}>Review</Text>
           <Text style={styles.tileSub}>Pending memory candidates</Text>
         </Pressable>
+        <Pressable
+          style={styles.tile}
+          onPress={() => router.push('/(main)/reflections')}
+        >
+          <Text style={styles.tileTitle}>Reflections</Text>
+          <Text style={styles.tileSub}>What your Twin noticed</Text>
+        </Pressable>
       </View>
 
       {loading ? (

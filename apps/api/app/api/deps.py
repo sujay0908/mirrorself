@@ -166,3 +166,40 @@ def conversation_service_dep(
 
 
 ConversationServiceDep = Annotated[ConversationService, Depends(conversation_service_dep)]
+
+
+# ---------------------------------------------------------------------
+# Sprint 7: reflection dependencies
+# ---------------------------------------------------------------------
+
+
+def reflection_service_dep(session: DBSession) -> ReflectionService:
+    from app.reflection.service import ReflectionService
+
+    return ReflectionService(session)
+
+
+def reflection_extractor_dep(
+    provider: LLMProviderDep,
+    settings: SettingsDep,
+) -> ReflectionExtractor:
+    """The reflection extractor shares the chat `LLMProvider` by default.
+
+    Tests override this dependency to pin a canned extractor or an
+    exploding one. A later `REFLECTION_LLM_PROVIDER` config can be
+    added here without touching callers (same shape as
+    `extraction_llm_provider_dep`).
+    """
+    from app.reflection.extractor import ReflectionExtractor
+
+    return ReflectionExtractor(provider, settings.llm_model)
+
+
+ReflectionServiceDep = Annotated["ReflectionService", Depends(reflection_service_dep)]
+ReflectionExtractorDep = Annotated["ReflectionExtractor", Depends(reflection_extractor_dep)]
+
+
+# Imports kept at the bottom so the forward-referenced Annotated types
+# resolve at import time without introducing a cycle.
+from app.reflection.extractor import ReflectionExtractor  # noqa: E402, F401
+from app.reflection.service import ReflectionService  # noqa: E402, F401

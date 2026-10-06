@@ -94,6 +94,17 @@ class Memory(Base, UUIDPKMixin, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    # Sprint 7: non-destructive memory dedup. When a confirmed
+    # `memory_dedup` reflection candidate is applied, the superseded
+    # memory keeps every row intact (content, sources, embeddings,
+    # provenance) and only this pointer is written. Retrieval filters
+    # by `superseded_by_memory_id IS NULL`; the memory list endpoint
+    # still returns the superseded row so the user can un-supersede.
+    superseded_by_memory_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("memories.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     sources: Mapped[list[MemorySource]] = relationship(
         back_populates="memory",

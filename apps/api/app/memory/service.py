@@ -117,6 +117,60 @@ class MemoryService:
         logger.info("memory.updated", memory_id=str(memory.id))
         return memory
 
+    async def supersede(
+        self,
+        twin: Twin,
+        memory_id: uuid.UUID,
+        by_memory_id: uuid.UUID,
+    ) -> Memory:
+        """Mark `memory_id` as superseded by `by_memory_id` (Sprint 7).
+
+        Non-destructive: both rows stay intact. Retrieval filters by
+        `superseded_by_memory_id IS NULL` so only the canonical row
+        participates in future prompts; the memory list endpoint still
+        returns the superseded row so the user can inspect or
+        un-supersede it.
+
+        Both IDs must belong to the authenticated user's twin. A
+        cross-twin supersede attempt raises `MemoryNotFoundError`
+        (via `self.get`) rather than leaking existence.
+        """
+        if memory_id == by_memory_id:
+            raise MemoryNotFoundError(
+                "A memory cannot supersede itself.",
+                details={"memory_id": str(memory_id)},
+            )
+        superseded = await self.get(twin, memory_id)
+        canonical = await self.get(twin, by_memory_id)
+        superseded.superseded_by_memory_id = canonical.id
+        await self._session.commit()
+        await self._session.refresh(superseded)
+        logger.info(
+            "memory.superseded",
+            memory_id=str(superseded.id),
+            canonical_memory_id=str(canonical.id),
+            twin_id=str(twin.id),
+        )
+        return superseded
+
+    async def unsupersede(self, twin: Twin, memory_id: uuid.UUID) -> Memory:
+        """Clear the supersession pointer on a previously-superseded memory.
+
+        Reversibility is a product promise — a confirmed `memory_dedup`
+        reflection is not a one-way trip. If the memory was not
+        superseded in the first place this is a no-op.
+        """
+        memory = await self.get(twin, memory_id)
+        memory.superseded_by_memory_id = None
+        await self._session.commit()
+        await self._session.refresh(memory)
+        logger.info(
+            "memory.unsuperseded",
+            memory_id=str(memory.id),
+            twin_id=str(twin.id),
+        )
+        return memory
+
     async def delete(self, twin: Twin, memory_id: uuid.UUID) -> None:
         memory = await self.get(twin, memory_id)
         await self._session.delete(memory)

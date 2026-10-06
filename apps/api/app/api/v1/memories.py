@@ -84,6 +84,25 @@ async def delete_memory(
     await memories.delete(twin, memory_id)
 
 
+@memories_router.post("/{memory_id}/unsupersede", response_model=MemoryOut)
+async def unsupersede_memory(
+    memory_id: uuid.UUID,
+    user: CurrentUser,
+    twins: TwinServiceDep,
+    memories: MemoryServiceDep,
+) -> MemoryOut:
+    """Reverse a previously-confirmed `memory_dedup` reflection.
+
+    Clears `superseded_by_memory_id` on the row so the memory
+    participates in retrieval again. Idempotent — unsuperseding a
+    non-superseded memory is a no-op. Owner-scoped: a wrong-owner
+    memory id yields 404.
+    """
+    twin = await twins.require_by_user(user.user_id)
+    memory = await memories.unsupersede(twin, memory_id)
+    return MemoryOut.model_validate(memory)
+
+
 @memories_router.get("/{memory_id}/provenance", response_model=MemoryProvenanceOut)
 async def get_memory_provenance(
     memory_id: uuid.UUID,

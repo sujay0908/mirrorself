@@ -162,3 +162,20 @@ CREATE POLICY goal_events_owner ON goal_events
             WHERE t.user_id = auth.uid()
         )
     );
+
+-- ================================================================
+-- Sprint 7: reflection candidates RLS
+-- ================================================================
+--
+-- Reflection candidates are user-confirmable proposals, so the only
+-- principal that may read or write a row is the owning user. Direct
+-- `twin_id` ownership (same pattern as memories, memory_candidates and
+-- goals). `memories.superseded_by_memory_id` sits inside the existing
+-- `memories_owner` policy already — it is a column on `memories`, not a
+-- new table, so no additional policy is needed for it.
+ALTER TABLE reflection_candidates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS reflection_candidates_owner ON reflection_candidates;
+CREATE POLICY reflection_candidates_owner ON reflection_candidates
+    FOR ALL
+    USING (twin_id IN (SELECT id FROM twins WHERE user_id = auth.uid()))
+    WITH CHECK (twin_id IN (SELECT id FROM twins WHERE user_id = auth.uid()));
