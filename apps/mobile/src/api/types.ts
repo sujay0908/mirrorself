@@ -131,6 +131,13 @@ export interface Memory {
   importance: number;
   user_confirmed: boolean;
   last_confirmed_at: ISODateTime | null;
+  /**
+   * Sprint 7: non-null when this memory has been superseded by a
+   * confirmed `memory_dedup` reflection. The row is NOT deleted; the
+   * memory list still exposes it, but context-building retrieval
+   * excludes it. See docs/architecture/reflection.md.
+   */
+  superseded_by_memory_id: UUID | null;
   metadata_json: Record<string, unknown>;
   created_at: ISODateTime;
   updated_at: ISODateTime;
@@ -220,4 +227,89 @@ export interface GoalEvent {
   to_status: GoalStatus | null;
   note: string | null;
   created_at: ISODateTime;
+}
+
+// ---------- Reflections (Sprint 7) ----------
+
+export type ReflectionKind =
+  | 'profile_update'
+  | 'memory_dedup'
+  | 'goal_update'
+  | 'insight';
+
+export type ReflectionStatus = 'pending' | 'confirmed' | 'rejected';
+
+export type ProfileUpdateField =
+  | 'communication_style_notes'
+  | 'basic_profile';
+
+export interface ProfileUpdatePayload {
+  kind: 'profile_update';
+  field: ProfileUpdateField;
+  current_value: unknown;
+  proposed_value: unknown;
+  rationale: string;
+}
+
+export interface MemoryDedupPayload {
+  kind: 'memory_dedup';
+  superseded_memory_id: UUID;
+  canonical_memory_id: UUID;
+  rationale: string;
+}
+
+export interface GoalUpdatePayload {
+  kind: 'goal_update';
+  goal_id: UUID;
+  note: string;
+  rationale: string;
+}
+
+export interface InsightPayload {
+  kind: 'insight';
+  headline: string;
+  body: string;
+  rationale: string;
+}
+
+export type ReflectionPayload =
+  | ProfileUpdatePayload
+  | MemoryDedupPayload
+  | GoalUpdatePayload
+  | InsightPayload;
+
+export interface Reflection {
+  id: UUID;
+  user_id: UUID;
+  twin_id: UUID;
+  kind: ReflectionKind;
+  status: ReflectionStatus;
+  proposed_payload: ReflectionPayload;
+  source_memory_ids: UUID[];
+  source_goal_ids: UUID[];
+  rationale: string | null;
+  confidence: number;
+  importance: number;
+  resolved_at: ISODateTime | null;
+  apply_error: string | null;
+  apply_metadata: Record<string, unknown>;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
+
+export interface ReflectionListOut {
+  items: Reflection[];
+}
+
+export interface ReflectionConfirmOut {
+  reflection: Reflection;
+  applied: boolean;
+  apply_metadata: Record<string, unknown>;
+}
+
+export interface ReflectionRunOut {
+  candidates_proposed: number;
+  candidates_persisted: number;
+  candidates_deduplicated: number;
+  error: string | null;
 }

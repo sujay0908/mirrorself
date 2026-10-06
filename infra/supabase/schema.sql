@@ -168,3 +168,58 @@ CREATE TABLE IF NOT EXISTS goal_events (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_goal_events_goal_id ON goal_events(goal_id);
+
+-- ================================================================
+-- Sprint 7: reflection subsystem
+-- Source of truth: apps/api/alembic/versions/0005_reflection.py
+-- ================================================================
+--
+-- Reflection candidates are user-confirmable proposals produced by the
+-- reflection extractor. The LLM proposes; the user confirms; only
+-- confirmation can create durable changes. Four approved kinds —
+-- `profile_update`, `memory_dedup`, `goal_update`, `insight`.
+--
+-- `memories.superseded_by_memory_id` is a nullable self-FK added by the
+-- same migration. Confirmed `memory_dedup` reflections mark a row as
+-- superseded (never deleted); retrieval filters by IS NULL while the
+-- normal memory list still exposes superseded rows for the un-supersede
+-- UX.
+
+ALTER TABLE memories
+    ADD COLUMN IF NOT EXISTS superseded_by_memory_id UUID
+        REFERENCES memories(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS ix_memories_superseded_by_memory_id
+    ON memories(superseded_by_memory_id);
+
+CREATE TABLE IF NOT EXISTS reflection_candidates (
+    id                 UUID PRIMARY KEY,
+    user_id            UUID NOT NULL,
+    twin_id            UUID NOT NULL REFERENCES twins(id) ON DELETE CASCADE,
+    kind               VARCHAR(32) NOT NULL
+                            CHECK (kind IN ('profile_update','memory_dedup',
+                                            'goal_update','insight')),
+    status             VARCHAR(16) NOT NULL DEFAULT 'pending'
+                            CHECK (status IN ('pending','confirmed','rejected')),
+    proposed_payload   JSON NOT NULL DEFAULT '{}'::json,
+    source_memory_ids  JSON NOT NULL DEFAULT '[]'::json,
+    source_goal_ids    JSON NOT NULL DEFAULT '[]'::json,
+    rationale          TEXT,
+    confidence         DOUBLE PRECISION NOT NULL DEFAULT 0.5
+                            CHECK (confidence >= 0 AND confidence <= 1),
+    importance         DOUBLE PRECISION NOT NULL DEFAULT 0.5
+                            CHECK (importance >= 0 AND importance <= 1),
+    fingerprint        VARCHAR(64),
+    resolved_at        TIMESTAMPTZ,
+    apply_error        VARCHAR(255),
+    apply_metadata     JSON NOT NULL DEFAULT '{}'::json,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_reflection_candidates_user_id
+    ON reflection_candidates(user_id);
+CREATE INDEX IF NOT EXISTS ix_reflection_candidates_twin_id
+    ON reflection_candidates(twin_id);
+CREATE INDEX IF NOT EXISTS ix_reflection_candidates_twin_status_created
+    ON reflection_candidates(twin_id, status, created_at);
+CREATE INDEX IF NOT EXISTS ix_reflection_candidates_twin_fingerprint
+    ON reflection_candidates(twin_id, status, fingerprint);

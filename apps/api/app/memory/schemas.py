@@ -52,6 +52,12 @@ class MemoryOut(BaseModel):
     user_confirmed: bool
     last_confirmed_at: datetime | None
     metadata_json: dict[str, Any]
+    # Sprint 7: non-destructive dedup pointer. NULL for normal memories;
+    # set to the canonical memory's id when a confirmed `memory_dedup`
+    # reflection has superseded this row. Retrieval excludes rows where
+    # this is non-NULL; the listing endpoint still returns them so the
+    # mobile UI can show a "superseded by…" badge.
+    superseded_by_memory_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
     sources: list[MemorySourceOut] = Field(default_factory=list)

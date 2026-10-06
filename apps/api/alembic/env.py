@@ -20,6 +20,7 @@ from app.conversation import models as _conv_models  # noqa: F401
 from app.db.base import Base
 from app.goal import models as _goal_models  # noqa: F401
 from app.memory import models as _mem_models  # noqa: F401
+from app.reflection import models as _refl_models  # noqa: F401
 
 # Import all models so they are registered on Base.metadata before autogenerate.
 from app.twin import models as _twin_models  # noqa: F401

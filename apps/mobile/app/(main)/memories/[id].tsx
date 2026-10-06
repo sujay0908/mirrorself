@@ -93,6 +93,19 @@ export default function MemoryDetailScreen() {
     ]);
   }
 
+  async function unsupersede() {
+    if (!id || !memory) return;
+    try {
+      const updated = await api.unsupersedeMemory(id);
+      setMemory(updated);
+    } catch (e) {
+      Alert.alert(
+        'Could not un-supersede',
+        e instanceof APIError ? e.message : String(e),
+      );
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -120,6 +133,39 @@ export default function MemoryDetailScreen() {
           {new Date(memory.created_at).toLocaleString()}
         </Text>
       </View>
+
+      {memory.superseded_by_memory_id ? (
+        <View style={styles.supersededBanner}>
+          <Text style={styles.supersededTitle}>Superseded</Text>
+          <Text style={styles.supersededBody}>
+            Your Twin stopped using this memory for new chats because a
+            confirmed reflection marked it as replaced. The row is kept
+            here so you can review it, see what replaced it, or restore
+            it.
+          </Text>
+          <View style={styles.row}>
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/(main)/memories/[id]',
+                  params: {
+                    id: memory.superseded_by_memory_id as string,
+                  },
+                })
+              }
+              style={[styles.btn, styles.btnSecondary]}
+            >
+              <Text style={styles.btnSecondaryText}>View replacement</Text>
+            </Pressable>
+            <Pressable
+              onPress={unsupersede}
+              style={[styles.btn, styles.btnPrimary]}
+            >
+              <Text style={styles.btnPrimaryText}>Un-supersede</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
 
       {editing ? (
         <TextInput
@@ -287,4 +333,14 @@ const styles = StyleSheet.create({
   sourceMeta: { fontSize: 12, color: '#6b7280' },
   sourceLink: { color: '#4338ca', fontWeight: '600', marginTop: 4 },
   emptyBody: { color: '#6b7280' },
+  supersededBanner: {
+    backgroundColor: '#fef3c7',
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    gap: 10,
+  },
+  supersededTitle: { fontSize: 14, fontWeight: '700', color: '#92400e' },
+  supersededBody: { fontSize: 13, color: '#78350f', lineHeight: 18 },
 });

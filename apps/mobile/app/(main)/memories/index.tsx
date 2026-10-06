@@ -113,13 +113,21 @@ export default function MemoriesScreen() {
                   params: { id: item.id },
                 })
               }
-              style={styles.row}
+              style={[
+                styles.row,
+                item.superseded_by_memory_id ? styles.rowSuperseded : null,
+              ]}
             >
               <View style={styles.rowHeader}>
                 <Text style={styles.badge}>{item.type}</Text>
-                <Text style={styles.ts}>
-                  {new Date(item.created_at).toLocaleDateString()}
-                </Text>
+                <View style={styles.rowHeaderRight}>
+                  {item.superseded_by_memory_id ? (
+                    <Text style={styles.supersededTag}>Superseded</Text>
+                  ) : null}
+                  <Text style={styles.ts}>
+                    {new Date(item.created_at).toLocaleDateString()}
+                  </Text>
+                </View>
               </View>
               <Text style={styles.content} numberOfLines={2}>
                 {item.content}
@@ -189,4 +197,22 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   headerBtnText: { color: '#4338ca', fontWeight: '600' },
+  rowSuperseded: {
+    backgroundColor: '#fffbeb',
+    borderColor: '#fcd34d',
+  },
+  rowHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  supersededTag: {
+    backgroundColor: '#fef3c7',
+    color: '#92400e',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    fontSize: 11,
+    fontWeight: '700',
+  },
 });

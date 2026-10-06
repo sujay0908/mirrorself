@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1 import conversations, goals, health, memories, twin
+from app.api.v1 import conversations, goals, health, memories, reflections, twin
 
 v1_router = APIRouter()
 v1_router.include_router(health.router, tags=["system"])
@@ -17,3 +17,4 @@ v1_router.include_router(
     tags=["memory-candidates"],
 )
 v1_router.include_router(goals.router, prefix="/goals", tags=["goals"])
+v1_router.include_router(reflections.router, prefix="/reflections", tags=["reflections"])

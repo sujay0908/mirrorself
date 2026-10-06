@@ -21,6 +21,11 @@ import type {
   MemoryType,
   Message,
   MessagePair,
+  Reflection,
+  ReflectionConfirmOut,
+  ReflectionListOut,
+  ReflectionRunOut,
+  ReflectionStatus,
   Twin,
   TwinCreateIn,
   TwinProfilePatch,
@@ -137,6 +142,22 @@ export const api = {
     request<Goal>('PATCH', `/goals/${id}`, patch),
   listGoalEvents: (id: UUID) =>
     request<{ items: GoalEvent[] }>('GET', `/goals/${id}/events`),
+
+  // Memory supersession (Sprint 7)
+  unsupersedeMemory: (id: UUID) =>
+    request<Memory>('POST', `/memories/${id}/unsupersede`),
+
+  // Reflections (Sprint 7)
+  //
+  // Manual trigger only; the API is a plain POST. The runtime bounds the
+  // input (24 memories, 10 goals, 20 turns) so this call is predictable.
+  listReflections: (status: ReflectionStatus | 'all' = 'pending') =>
+    request<ReflectionListOut>('GET', `/reflections?status=${status}`),
+  runReflections: () => request<ReflectionRunOut>('POST', '/reflections/run'),
+  confirmReflection: (id: UUID) =>
+    request<ReflectionConfirmOut>('POST', `/reflections/${id}/confirm`),
+  rejectReflection: (id: UUID) =>
+    request<Reflection>('POST', `/reflections/${id}/reject`),
 };
 
 export type API = typeof api;

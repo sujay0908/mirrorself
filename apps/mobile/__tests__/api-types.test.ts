@@ -16,6 +16,9 @@ import type {
   MemoryCandidate,
   MemoryProvenance,
   Message,
+  Reflection,
+  ReflectionConfirmOut,
+  ReflectionRunOut,
   Twin,
 } from '@/api/types';
 import type { API } from '@/api/client';
@@ -114,6 +117,7 @@ const _memorySample: Memory = {
   importance: 0.8,
   user_confirmed: true,
   last_confirmed_at: '2026-10-03T00:00:00Z',
+  superseded_by_memory_id: null,
   metadata_json: {},
   created_at: '2026-10-03T00:00:00Z',
   updated_at: '2026-10-03T00:00:00Z',
@@ -151,10 +155,57 @@ type _ApiHas = Pick<
   | 'listCandidates'
   | 'confirmCandidate'
   | 'rejectCandidate'
+  // Sprint 7 reflection surface
+  | 'listReflections'
+  | 'runReflections'
+  | 'confirmReflection'
+  | 'rejectReflection'
+  | 'unsupersedeMemory'
 >;
 
 // If this reference compiles, every method above is present on `API`.
 const _apiShape: null | _ApiHas = null;
+
+// Sprint 7: a profile_update reflection sample. The payload is a
+// discriminated union; this literal pins the discriminator so the
+// compiler verifies the per-kind field set.
+const _reflectionSample: Reflection = {
+  id: '00000000-0000-0000-0000-000000000000',
+  user_id: '00000000-0000-0000-0000-000000000000',
+  twin_id: '00000000-0000-0000-0000-000000000000',
+  kind: 'profile_update',
+  status: 'pending',
+  proposed_payload: {
+    kind: 'profile_update',
+    field: 'communication_style_notes',
+    current_value: null,
+    proposed_value: 'Prefers short answers in the morning.',
+    rationale: 'Observed over three morning sessions.',
+  },
+  source_memory_ids: ['00000000-0000-0000-0000-000000000000'],
+  source_goal_ids: [],
+  rationale: 'Observed over three morning sessions.',
+  confidence: 0.7,
+  importance: 0.5,
+  resolved_at: null,
+  apply_error: null,
+  apply_metadata: {},
+  created_at: '2026-10-05T00:00:00Z',
+  updated_at: '2026-10-05T00:00:00Z',
+};
+
+const _confirmOutSample: ReflectionConfirmOut = {
+  reflection: { ..._reflectionSample, status: 'confirmed' },
+  applied: true,
+  apply_metadata: { kind: 'profile_update' },
+};
+
+const _runOutSample: ReflectionRunOut = {
+  candidates_proposed: 2,
+  candidates_persisted: 2,
+  candidates_deduplicated: 0,
+  error: null,
+};
 
 test('type smoke passes', () => {
   expect(_twinSample.display_name).toBe('Aurora');
@@ -165,6 +216,15 @@ test('type smoke passes', () => {
   expect(_goalEventSample.event_type).toBe('status_changed');
   expect(_candidateSample.status).toBe('pending');
   expect(_memorySample.user_confirmed).toBe(true);
+  expect(_memorySample.superseded_by_memory_id).toBeNull();
   expect(_provSample.sources[0].source_snippet).toBe('I live in Bengaluru.');
   expect(_apiShape).toBeNull();
+  expect(_reflectionSample.kind).toBe('profile_update');
+  if (_reflectionSample.proposed_payload.kind === 'profile_update') {
+    expect(_reflectionSample.proposed_payload.field).toBe(
+      'communication_style_notes',
+    );
+  }
+  expect(_confirmOutSample.applied).toBe(true);
+  expect(_runOutSample.candidates_proposed).toBe(2);
 });

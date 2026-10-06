@@ -291,6 +291,11 @@ class MemoryRetriever:
                 Memory.twin_id == twin.id,
                 Memory.user_confirmed.is_(True),
                 MemoryEmbedding.embedding_vector.is_not(None),
+                # Sprint 7: skip memories a confirmed `memory_dedup`
+                # reflection superseded. The row still exists for the
+                # listing endpoint; it just doesn't participate in
+                # retrieval any more.
+                Memory.superseded_by_memory_id.is_(None),
             )
             .order_by("dist")
             .limit(fetch_limit)
@@ -323,6 +328,8 @@ class MemoryRetriever:
                 Memory.twin_id == twin.id,
                 Memory.user_confirmed.is_(True),
                 MemoryEmbedding.embedding_vector.is_not(None),
+                # Sprint 7: skip superseded memories (see PG path above).
+                Memory.superseded_by_memory_id.is_(None),
             )
             .options(selectinload(Memory.sources))
         )
