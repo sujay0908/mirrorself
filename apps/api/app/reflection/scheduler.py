@@ -30,11 +30,12 @@ with a logged `reflection.schedule.failed`.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -50,10 +51,133 @@ logger = get_logger(__name__)
 
 # Default thresholds. The Settings object below can override each one;
 # tests pin the defaults so a future tweak is a visible change.
+#
+# Sprint 8.1 hardening: these are ALSO the SAFETY FLOORS. Both
+# `Settings` (via `Field(ge=…)`) and `OpportunityPolicy.__post_init__`
+# refuse to go below these values. A misconfigured deployment or a
+# future caller cannot programmatically construct a policy that would
+# run reflection more aggressively than the shipped Sprint-8 contract.
 DEFAULT_MIN_NEW_MEMORIES: int = 3
 DEFAULT_MIN_GOAL_EVENTS: int = 2
 DEFAULT_COOLDOWN_SECONDS: int = 1800
 DEFAULT_MAX_PENDING_BACKLOG: int = 10
+
+# Backlog bounds — pending-candidate count MUST stay in [MIN, MAX].
+# MIN=1 so a configured value of 0 cannot effectively disable the
+# backlog brake. MAX=100 so a misconfigured deployment cannot lift the
+# brake to the point of letting the pending-candidate queue grow
+# unboundedly.
+MIN_PENDING_BACKLOG_FLOOR: int = 1
+MAX_PENDING_BACKLOG_CEIL: int = 100
+
+
+# ----------------------------------------------------------------
+# Reflection context limits — SINGLE SOURCE OF TRUTH (Sprint 8.1)
+# ----------------------------------------------------------------
+#
+# Both the manual `/v1/reflections/run` endpoint and the scheduled
+# `ReflectionScheduler.maybe_run` consume the same bounded, owner-
+# scoped view of the twin's memories, active goals, and recent turns.
+# Sprint 8 duplicated these numeric caps across two modules; the
+# dataclass below is the one place they live now.
+
+
+@dataclass(frozen=True, slots=True)
+class ReflectionContextLimits:
+    """Caps on the input the reflection extractor sees.
+
+    Values picked in Sprint 7 to keep the LLM call predictable
+    (24 confirmed memories, 10 active goals, 20 recent user/twin
+    turns). The caps are structural — the extractor is only expected
+    to reason over this bounded view, and larger inputs would blow
+    the context window.
+    """
+
+    max_memories: int = 24
+    max_goals: int = 10
+    max_recent_turns: int = 20
+
+
+REFLECTION_CONTEXT_LIMITS = ReflectionContextLimits()
+
+
+# ----------------------------------------------------------------
+# Advisory-lock helpers (Sprint 8.1)
+# ----------------------------------------------------------------
+#
+# Multi-worker reflection safety. The scheduler fires once per chat
+# turn via a FastAPI `BackgroundTasks` runner — in a multi-worker ASGI
+# deployment two workers can race on the same twin. Postgres advisory
+# locks give us a database-native per-twin mutex with no new table,
+# no new persistence mechanism, and no external service (no Redis).
+
+_ADVISORY_LOCK_NAMESPACE: str = "reflection-scheduler:"
+_INT64_SIGNED_MIN: int = -(1 << 63)
+_INT64_SIGNED_MAX: int = (1 << 63) - 1
+
+
+def _advisory_lock_key(twin_id: uuid.UUID) -> int:
+    """Deterministic 64-bit Postgres advisory-lock key for one twin.
+
+    Formula:
+        key = int.from_bytes(
+            SHA256("reflection-scheduler:" + str(twin_id))[:8],
+            "big",
+            signed=True,
+        )
+
+    Properties:
+    - Deterministic — same twin_id across workers → same key.
+    - Collision-safe — SHA-256 over a namespaced input, 8 bytes
+      (2**64 keyspace). CRC32 would be only 2**32 and shares the
+      namespace with any other 32-bit caller; a 64-bit SHA-256 slice
+      keeps the keyspace disjoint.
+    - Namespaced — the `reflection-scheduler:` prefix leaves room for
+      a future `memory-consolidator:` or similar scheduler to use
+      the same mechanism with a disjoint keyspace.
+    - Fits a Postgres `bigint` exactly (`signed=True` keeps the value
+      in the two's-complement int64 range).
+    """
+    digest = hashlib.sha256((_ADVISORY_LOCK_NAMESPACE + str(twin_id)).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+
+async def try_acquire_reflection_lock(session: AsyncSession, twin_id: uuid.UUID) -> bool:
+    """Try to acquire the per-twin reflection advisory lock.
+
+    - On PostgreSQL, calls `pg_try_advisory_xact_lock(:key)` — the
+      lock is tied to the open transaction and releases automatically
+      at the next commit/rollback. Returns True iff the current
+      transaction got the lock.
+    - On other dialects (SQLite in the test harness), returns True
+      unconditionally. SQLite deployments are single-process by
+      construction, so there is nothing to coordinate.
+
+    The caller MUST already hold an open transaction (any read or
+    write started one). SQLAlchemy's `AsyncSession` autobegins a
+    transaction on first use.
+
+    NEVER raises — a database error during the lock attempt is
+    treated as "lock not acquired" and logged. The chat path never
+    sees this call.
+    """
+    dialect = session.bind.dialect.name if session.bind else "unknown"
+    if dialect != "postgresql":
+        return True
+    key = _advisory_lock_key(twin_id)
+    try:
+        result = await session.execute(
+            text("SELECT pg_try_advisory_xact_lock(:key)").bindparams(key=key)
+        )
+        acquired = bool(result.scalar_one())
+        return acquired
+    except Exception as exc:
+        logger.warning(
+            "reflection.advisory_lock.error",
+            twin_id=str(twin_id),
+            error=type(exc).__name__,
+        )
+        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,12 +201,46 @@ class ReflectionOpportunity:
 
 @dataclass(frozen=True, slots=True)
 class OpportunityPolicy:
-    """Deterministic opportunity-detection policy."""
+    """Deterministic opportunity-detection policy.
+
+    Sprint 8.1 hardening (SAFETY FLOOR, ironclad):
+    `__post_init__` clamps every field UP to the Sprint-8 defaults
+    (or clamps `max_pending_backlog` into [MIN, MAX]) before the
+    frozen dataclass finishes construction. The intent is structural
+    — no construction path, including direct instantiation in a test
+    or worker, can produce a policy that runs reflection more
+    aggressively than the shipped contract.
+
+    A reader seeing `object.__setattr__` here should know it is the
+    standard idiom for post-init adjustments on a frozen dataclass;
+    the fields remain immutable after construction returns.
+    """
 
     min_new_memories: int = DEFAULT_MIN_NEW_MEMORIES
     min_goal_events: int = DEFAULT_MIN_GOAL_EVENTS
     cooldown_seconds: int = DEFAULT_COOLDOWN_SECONDS
     max_pending_backlog: int = DEFAULT_MAX_PENDING_BACKLOG
+
+    def __post_init__(self) -> None:
+        # Floor the three "minimum signal strength" thresholds UP to
+        # the shipped Sprint-8 defaults. A sub-floor value is a
+        # misconfiguration; silently honoring it would make the
+        # scheduler more aggressive than approved.
+        if self.min_new_memories < DEFAULT_MIN_NEW_MEMORIES:
+            object.__setattr__(self, "min_new_memories", DEFAULT_MIN_NEW_MEMORIES)
+        if self.min_goal_events < DEFAULT_MIN_GOAL_EVENTS:
+            object.__setattr__(self, "min_goal_events", DEFAULT_MIN_GOAL_EVENTS)
+        if self.cooldown_seconds < DEFAULT_COOLDOWN_SECONDS:
+            object.__setattr__(self, "cooldown_seconds", DEFAULT_COOLDOWN_SECONDS)
+        # Clamp `max_pending_backlog` to [MIN_FLOOR, MAX_CEIL]. The
+        # floor stops a configured 0 from effectively disabling the
+        # backlog brake. The ceiling stops a misconfigured deployment
+        # from lifting the brake past a point where the pending-
+        # candidate queue grows unboundedly.
+        if self.max_pending_backlog < MIN_PENDING_BACKLOG_FLOOR:
+            object.__setattr__(self, "max_pending_backlog", MIN_PENDING_BACKLOG_FLOOR)
+        elif self.max_pending_backlog > MAX_PENDING_BACKLOG_CEIL:
+            object.__setattr__(self, "max_pending_backlog", MAX_PENDING_BACKLOG_CEIL)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> OpportunityPolicy:
@@ -169,11 +327,12 @@ class ScheduleRunResult:
 # `/v1/reflections/run` endpoint used inline. Lifted here so the
 # scheduler can reuse them without the endpoint having to import the
 # scheduler. The endpoint is updated to call these.
-
-
-SCHEDULER_MAX_MEMORIES: int = 24
-SCHEDULER_MAX_GOALS: int = 10
-SCHEDULER_MAX_RECENT_TURNS: int = 20
+#
+# Sprint 8.1 unified the per-source caps into `REFLECTION_CONTEXT_LIMITS`
+# at the top of this module. The former `SCHEDULER_MAX_*` constants
+# were removed. Both the manual endpoint and the scheduler read
+# `REFLECTION_CONTEXT_LIMITS.max_memories` / `.max_goals` /
+# `.max_recent_turns`.
 
 
 async def load_recent_memories(
@@ -336,6 +495,30 @@ class ReflectionScheduler:
         self._policy = policy
 
     async def maybe_run(self, twin: Twin) -> ScheduleRunResult:
+        # Sprint 8.1: per-twin advisory lock FIRST. If another worker
+        # (or the manual `/v1/reflections/run`) already holds the lock
+        # for this twin, we skip without touching gather_signals, the
+        # extractor, or `last_reflection_run_at`. The lock is
+        # transaction-scoped and releases on this session's commit
+        # or rollback — including the one `create_candidates` does
+        # below, OR the implicit rollback when the session closes.
+        if not await try_acquire_reflection_lock(self._session, twin.id):
+            synthesized = ReflectionOpportunity(
+                should_run=False,
+                reason="skip:locked",
+                signals=OpportunitySignals(
+                    new_confirmed_memories=0,
+                    meaningful_goal_events=0,
+                    pending_backlog=0,
+                    seconds_since_last_run=None,
+                ),
+            )
+            logger.info(
+                "reflection.schedule.skipped_locked",
+                twin_id=str(twin.id),
+            )
+            return ScheduleRunResult(ran=False, opportunity=synthesized)
+
         signals = await gather_signals(self._session, twin)
         opportunity = self._policy.evaluate(signals)
         if not opportunity.should_run:
@@ -361,9 +544,25 @@ class ReflectionScheduler:
         )
         logger.info("reflection.schedule.started", twin_id=str(twin.id))
 
-        memory_rows = await load_recent_memories(self._session, twin, limit=SCHEDULER_MAX_MEMORIES)
-        goal_rows = await load_active_goals(self._session, twin, limit=SCHEDULER_MAX_GOALS)
-        turn_rows = await load_recent_turns(self._session, twin, limit=SCHEDULER_MAX_RECENT_TURNS)
+        # The lock is held across the LLM call. This holds one DB
+        # connection per currently-reflecting twin for the duration of
+        # the extractor; the alternative (short-claim transaction that
+        # releases before the LLM call) would require stamping
+        # `last_reflection_run_at` as the claim marker, which conflicts
+        # with Sprint 8's documented semantic that the stamp advances
+        # only on SUCCESS. The connection cost is bounded by the ASGI
+        # worker pool and is the acceptable price for duplicate-safety
+        # without a second persistence mechanism. See
+        # docs/architecture/evolving-twin-loop.md.
+        memory_rows = await load_recent_memories(
+            self._session, twin, limit=REFLECTION_CONTEXT_LIMITS.max_memories
+        )
+        goal_rows = await load_active_goals(
+            self._session, twin, limit=REFLECTION_CONTEXT_LIMITS.max_goals
+        )
+        turn_rows = await load_recent_turns(
+            self._session, twin, limit=REFLECTION_CONTEXT_LIMITS.max_recent_turns
+        )
         profile = twin.profile
         extraction = await self._extractor.extract(
             memories=memory_rows,

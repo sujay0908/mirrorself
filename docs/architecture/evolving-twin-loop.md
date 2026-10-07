@@ -245,6 +245,139 @@ Never user content.
 
 ---
 
+## Sprint 8.1 hardening — multi-worker safety + config floor + unified limits
+
+Three operational risks surfaced by the Sprint-8 post-merge audit were
+closed in Sprint 8.1 without changing user-visible product behavior
+or any existing reflection/memory/profile contract.
+
+### Per-twin advisory lock
+
+The scheduler fires once per chat turn via `FastAPIBackgroundRunner`.
+In a multi-worker ASGI deployment two workers can race on the same
+twin. Sprint 8.1 adds a per-twin PostgreSQL advisory lock to
+coordinate — no new table, no new persistence mechanism, no Redis,
+no external service.
+
+Key derivation (deterministic, namespaced, int64-safe):
+
+```
+key = int.from_bytes(
+    SHA256("reflection-scheduler:" + str(twin_id))[:8],
+    "big", signed=True,
+)
+```
+
+Taken from `apps/api/app/reflection/scheduler.py:_advisory_lock_key`.
+The `reflection-scheduler:` prefix is a namespace so a future category
+(e.g. `memory-consolidator:`) can share this mechanism with a disjoint
+keyspace. SHA-256 over 8 bytes gives a 2⁶⁴ keyspace, far cleaner than
+CRC32.
+
+Acquisition is **transaction-scoped**:
+`pg_try_advisory_xact_lock(:key)`. The lock releases automatically at
+the next commit or rollback. The scheduler acquires it before any
+other DB work and holds it across:
+`gather_signals → policy → extractor → create_candidates → stamp
+last_reflection_run_at → commit`.
+
+The manual `/v1/reflections/run` endpoint acquires the SAME per-twin
+key before doing any work. When the lock is already held it returns
+HTTP 200 with the shape `ReflectionRunOut(error="already_running",
+candidates_proposed=0, candidates_persisted=0,
+candidates_deduplicated=0)`. The request does not block. The endpoint
+contract is unchanged — only the error tag varies. The mobile UI can
+distinguish this from a provider error by inspecting `error`.
+
+On non-postgres dialects (SQLite in the test harness) the helper
+returns `True` unconditionally: SQLite deployments are
+single-process by construction so there is nothing to coordinate.
+
+**Tradeoff explicitly accepted**: holding the advisory lock across
+the LLM extractor call keeps one DB connection busy per currently-
+reflecting twin for the full extractor latency (seconds). The
+alternative — a short claim transaction that releases before the LLM
+call — would require stamping `last_reflection_run_at` as the claim
+marker, which **conflicts with Sprint 8's documented contract that
+the stamp advances only on SUCCESS**. Introducing any new "running"
+column or table is the "second persistence mechanism" explicitly out
+of scope for this hardening. The connection cost is bounded by the
+ASGI worker pool and is the acceptable price for duplicate-safety
+without a schema change. Pinned by
+`test_scheduler_skipped_locked_does_not_call_extractor` and
+`test_manual_run_returns_already_running_when_locked`.
+
+Why duplicates cannot happen under two concurrent workers:
+1. `pg_try_advisory_xact_lock(key(twin_id))` is a Postgres-level
+   mutex. Exactly one worker gets `true` for a given key across all
+   active transactions.
+2. The lock is held across the extractor + `create_candidates` +
+   commit, so the losing worker never writes anything.
+3. Belt-and-braces: `ReflectionService.create_candidates` still
+   enforces per-twin fingerprint dedup on
+   `(twin_id, kind, sorted source_memory_ids, sorted source_goal_ids)`.
+   Two identical draft sets collapse to one.
+
+New structured event: `reflection.schedule.skipped_locked` (twin_id
+only). Manual-path mirror: `reflection.manual_run.skipped_locked`.
+
+### Opportunity-policy safety floor (ironclad)
+
+Four `OpportunityPolicy` thresholds carry a server-side floor
+enforced by **two layers**:
+
+| Threshold                            | Floor / bound                             |
+| ------------------------------------ | ----------------------------------------- |
+| `reflection_min_new_memories`        | ≥ 3                                        |
+| `reflection_min_goal_events`         | ≥ 2                                        |
+| `reflection_min_cooldown_seconds`    | ≥ 1800                                     |
+| `reflection_max_pending_backlog`     | 1 ≤ value ≤ 100                            |
+
+Layer 1 — `Settings` field constraints: `Field(ge=…, le=…)`. A
+misconfigured environment variable fails `Settings()` construction
+with a `pydantic.ValidationError` at import — the app refuses to boot
+rather than silently generate noisy reflections.
+
+Layer 2 — `OpportunityPolicy.__post_init__` clamps sub-floor /
+over-ceiling values UP (or down to the ceiling) using
+`object.__setattr__` on the frozen dataclass. No direct construction,
+including in a test or worker that bypasses `Settings`, can produce
+a policy weaker than the Sprint-8 floor. The dataclass stays frozen
+after construction returns.
+
+The shipped defaults ARE the floors; raising a threshold (making the
+scheduler more conservative) is still permitted. Pinned by
+`test_settings_rejects_*`, `test_opportunity_policy_clamps_*`,
+`test_opportunity_policy_frozen_after_clamp`,
+`test_sprint_8_decision_1_shape_still_holds_after_floor`.
+
+### Unified context limits
+
+Sprint 8 duplicated three per-source caps across two modules
+(`_MAX_MEMORIES` / `_MAX_GOALS` / `_MAX_RECENT_TURNS` in
+`apps/api/app/api/v1/reflections.py`, `SCHEDULER_MAX_MEMORIES` /
+`SCHEDULER_MAX_GOALS` / `SCHEDULER_MAX_RECENT_TURNS` in
+`apps/api/app/reflection/scheduler.py`). Sprint 8.1 collapses them
+into one frozen dataclass:
+
+```python
+@dataclass(frozen=True, slots=True)
+class ReflectionContextLimits:
+    max_memories: int = 24
+    max_goals: int = 10
+    max_recent_turns: int = 20
+
+REFLECTION_CONTEXT_LIMITS = ReflectionContextLimits()
+```
+
+Both the manual endpoint and the scheduler now read from this single
+object. Values stay 24 / 10 / 20 exactly. The two tests
+`test_old_duplicated_constants_removed_*` prevent reintroduction;
+`test_manual_and_scheduler_paths_use_same_limits` asserts both call
+sites hit the loader with the same limit kwargs.
+
+---
+
 ## Non-goals (deferred past Sprint 8)
 
 - LLM-backed intent detection — still rule-based.
