@@ -9,6 +9,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,10 +50,23 @@ class Settings(BaseSettings):
     # These thresholds drive `OpportunityPolicy`. All four are
     # intentionally conservative: they prefer SKIP over noisy
     # reflections. See docs/architecture/evolving-twin-loop.md.
-    reflection_min_new_memories: int = 3
-    reflection_min_goal_events: int = 2
-    reflection_min_cooldown_seconds: int = 1800
-    reflection_max_pending_backlog: int = 10
+    #
+    # Sprint 8.1 hardening: each threshold has a server-side SAFETY
+    # FLOOR enforced at construction time via `Field(ge=…)` / `le=…`.
+    # A misconfigured deployment that tries to lower a threshold below
+    # the approved Sprint-8 default will fail Settings() construction
+    # with a pydantic.ValidationError — the app refuses to boot rather
+    # than silently generate noisy reflections and spend LLM budget.
+    # The floors ARE the shipped defaults; raising a threshold (making
+    # it more conservative) is still permitted.
+    #
+    # Belt-and-braces: `OpportunityPolicy.__post_init__` applies the
+    # same floors to defend against direct construction that bypasses
+    # Settings (tests, workers).
+    reflection_min_new_memories: int = Field(default=3, ge=3)
+    reflection_min_goal_events: int = Field(default=2, ge=2)
+    reflection_min_cooldown_seconds: int = Field(default=1800, ge=1800)
+    reflection_max_pending_backlog: int = Field(default=10, ge=1, le=100)
 
     # ---- CORS ----
     cors_allow_origins: str = "http://localhost:8081,http://localhost:19006"

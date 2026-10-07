@@ -26,6 +26,11 @@ from app.api.deps import (
     SettingsDep,
     TwinServiceDep,
 )
+from app.observability.logging import get_logger
+from app.reflection.scheduler import (
+    REFLECTION_CONTEXT_LIMITS,
+    try_acquire_reflection_lock,
+)
 from app.reflection.scheduler import (
     load_active_goals as _load_active_goals,
 )
@@ -44,13 +49,11 @@ from app.reflection.schemas import (
 )
 
 router = APIRouter()
+logger = get_logger(__name__)
 
-# Reflection input is bounded to keep the LLM call predictable.
-# These caps are deliberately smaller than the chat-time ContextBudget
-# because reflection is run on demand, not every turn.
-_MAX_MEMORIES = 24
-_MAX_GOALS = 10
-_MAX_RECENT_TURNS = 20
+# Reflection input is bounded via the single source of truth in
+# `app.reflection.scheduler.REFLECTION_CONTEXT_LIMITS`. The manual
+# endpoint and the chat-time scheduler consume the same caps.
 
 _STATUS_QUERY = Query(default="pending", alias="status")
 
@@ -124,6 +127,16 @@ async def run_reflection(
     Synchronous for Sprint 7. The LLM call plus a bounded SQL
     footprint is the only cost. Rate-limiting + scheduled triggers
     are Sprint 8.
+
+    Sprint 8.1: the manual path shares the per-twin advisory lock with
+    the background scheduler so a chat-time scheduled run and a
+    user-triggered run cannot both execute the extractor + persist
+    candidates for the same twin at the same time. When the lock is
+    already held, the manual request returns its normal
+    `ReflectionRunOut` shape with `error="already_running"` — HTTP
+    200, zero counts — so the mobile UI can tell the user without
+    receiving a client-error status. The request does NOT block
+    waiting for the other reflection.
     """
     twin = await twins.require_by_user(user.user_id)
     # Pull bounded, owner-scoped input. The service layer always
@@ -133,9 +146,24 @@ async def run_reflection(
     # We only use `MemoryService.list_for_twin`-shaped reads
     # directly to avoid pulling the memory_sources/embeddings graph.
     session = reflections._session
-    memory_rows = await _load_recent_memories(session, twin, limit=_MAX_MEMORIES)
-    goal_rows = await _load_active_goals(session, twin, limit=_MAX_GOALS)
-    turn_rows = await _load_recent_turns(session, twin, limit=_MAX_RECENT_TURNS)
+    if not await try_acquire_reflection_lock(session, twin.id):
+        logger.info(
+            "reflection.manual_run.skipped_locked",
+            twin_id=str(twin.id),
+        )
+        return ReflectionRunOut(
+            candidates_proposed=0,
+            candidates_persisted=0,
+            candidates_deduplicated=0,
+            error="already_running",
+        )
+    memory_rows = await _load_recent_memories(
+        session, twin, limit=REFLECTION_CONTEXT_LIMITS.max_memories
+    )
+    goal_rows = await _load_active_goals(session, twin, limit=REFLECTION_CONTEXT_LIMITS.max_goals)
+    turn_rows = await _load_recent_turns(
+        session, twin, limit=REFLECTION_CONTEXT_LIMITS.max_recent_turns
+    )
 
     profile = twin.profile
     try:
