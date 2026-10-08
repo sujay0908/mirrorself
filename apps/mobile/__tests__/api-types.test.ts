@@ -22,6 +22,7 @@ import type {
   ReflectionConfirmOut,
   ReflectionRunOut,
   Twin,
+  TwinPortrait,
 } from '@/api/types';
 import type { API } from '@/api/client';
 
@@ -165,6 +166,8 @@ type _ApiHas = Pick<
   | 'unsupersedeMemory'
   // Sprint 8 evolution surface
   | 'listEvolution'
+  // Sprint 9 self-portrait surface
+  | 'getTwinPortrait'
 >;
 
 // If this reference compiles, every method above is present on `API`.
@@ -244,6 +247,56 @@ const _evolutionListSample: EvolutionListOut = {
   items: [_evolutionProfileSample, _evolutionInsightSample],
 };
 
+// Sprint 9: self-portrait sample. The portrait is a deterministic
+// read-aggregator — profile + confirmed-memory summary + active goals
+// + newest-first evolution with Sprint 8's "learned"/"acknowledged"
+// lead attached server-side.
+const _portraitSample: TwinPortrait = {
+  profile: {
+    display_name: 'Aurora',
+    style_preset: 'warm',
+    style_notes: 'Short replies in the morning.',
+    basic_profile: { city: 'Lisbon' },
+  },
+  memory_summary: {
+    total_count: 3,
+    counts_by_type: { FACT: 2, PREFERENCE: 1, EXPERIENCE: 0, GOAL: 0 },
+    top_memories: [
+      {
+        id: '00000000-0000-0000-0000-000000000000',
+        type: 'FACT',
+        importance: 0.9,
+        snippet: 'Lives in Lisbon.',
+      },
+    ],
+  },
+  active_goals: [
+    {
+      id: '00000000-0000-0000-0000-000000000000',
+      title: 'Ship Sprint 9',
+      description: null,
+      priority: 2,
+      target_date: null,
+    },
+  ],
+  recent_evolution: [
+    {
+      id: '00000000-0000-0000-0000-000000000000',
+      event_type: 'profile_confirmed',
+      summary: 'profile.communication_style_notes updated',
+      created_at: '2026-10-08T00:00:00Z',
+      lead: 'learned',
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000001',
+      event_type: 'insight_acknowledged',
+      summary: 'insight acknowledged',
+      created_at: '2026-10-08T00:00:00Z',
+      lead: 'acknowledged',
+    },
+  ],
+};
+
 test('type smoke passes', () => {
   expect(_twinSample.display_name).toBe('Aurora');
   expect(_messageSample.role).toBe('twin');
@@ -270,4 +323,11 @@ test('type smoke passes', () => {
   expect(_evolutionProfileSample.event_type).toBe('profile_confirmed');
   expect(_evolutionInsightSample.event_type).toBe('insight_acknowledged');
   expect(_evolutionListSample.items).toHaveLength(2);
+  // Sprint 9: self-portrait shape pin.
+  expect(_portraitSample.profile.style_preset).toBe('warm');
+  expect(_portraitSample.memory_summary.total_count).toBe(3);
+  expect(_portraitSample.memory_summary.counts_by_type.FACT).toBe(2);
+  expect(_portraitSample.active_goals[0].priority).toBe(2);
+  expect(_portraitSample.recent_evolution[0].lead).toBe('learned');
+  expect(_portraitSample.recent_evolution[1].lead).toBe('acknowledged');
 });
