@@ -83,6 +83,13 @@ export default function HomeScreen() {
           <Text style={styles.tileTitle}>Evolution</Text>
           <Text style={styles.tileSub}>What your Twin learned</Text>
         </Pressable>
+        <Pressable
+          style={styles.tile}
+          onPress={() => router.push('/(main)/portrait')}
+        >
+          <Text style={styles.tileTitle}>Self-portrait</Text>
+          <Text style={styles.tileSub}>See what your Twin knows about you.</Text>
+        </Pressable>
       </View>
 
       {loading ? (

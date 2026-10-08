@@ -27,6 +27,7 @@ import type {
   ReflectionListOut,
   ReflectionRunOut,
   ReflectionStatus,
+  TwinPortrait,
   Twin,
   TwinCreateIn,
   TwinProfilePatch,
@@ -166,6 +167,12 @@ export const api = {
   // Rejected reflections do NOT appear here.
   listEvolution: (limit = 50) =>
     request<EvolutionListOut>('GET', `/twin/evolution?limit=${limit}`),
+
+  // Twin self-portrait (Sprint 9)
+  //
+  // Deterministic composition of profile + confirmed memories + active
+  // goals + recent evolution. No LLM is called. GET is side-effect-free.
+  getTwinPortrait: () => request<TwinPortrait>('GET', '/twin/portrait'),
 };
 
 export type API = typeof api;

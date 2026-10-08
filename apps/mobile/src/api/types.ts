@@ -347,3 +347,53 @@ export interface EvolutionEvent {
 export interface EvolutionListOut {
   items: EvolutionEvent[];
 }
+
+// ---------- Twin self-portrait (Sprint 9) ----------
+//
+// Deterministic composition of already-authorized data. No LLM.
+// Server-side truncates memory snippets at 240 characters.
+
+export type EvolutionLead = 'learned' | 'acknowledged';
+
+export interface PortraitProfile {
+  display_name: string;
+  style_preset: string;
+  style_notes: string | null;
+  basic_profile: Record<string, unknown>;
+}
+
+export interface PortraitMemory {
+  id: UUID;
+  type: string;
+  importance: number;
+  snippet: string;
+}
+
+export interface PortraitMemorySummary {
+  total_count: number;
+  counts_by_type: Record<string, number>;
+  top_memories: PortraitMemory[];
+}
+
+export interface PortraitGoal {
+  id: UUID;
+  title: string;
+  description: string | null;
+  priority: number;
+  target_date: ISODateTime | null;
+}
+
+export interface PortraitEvolution {
+  id: UUID;
+  event_type: EvolutionEventType;
+  summary: string;
+  created_at: ISODateTime;
+  lead: EvolutionLead;
+}
+
+export interface TwinPortrait {
+  profile: PortraitProfile;
+  memory_summary: PortraitMemorySummary;
+  active_goals: PortraitGoal[];
+  recent_evolution: PortraitEvolution[];
+}
