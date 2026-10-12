@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 
 import type { Message } from '@/api/types';
 import { citationsFromMessage } from '@/lib/citations';
+import { learningFromMessage, learningHeadline } from '@/lib/learning';
 
 interface Props {
   message: Message;
@@ -22,9 +23,11 @@ interface Props {
 export function MessageBubble({ message }: Props) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
+  const [learningExpanded, setLearningExpanded] = useState(false);
   const isUser = message.role === 'user';
   const { memoryIds, goalIds, hasAny: hasCitations } =
     citationsFromMessage(message);
+  const learning = learningFromMessage(message);
 
   return (
     <View>
@@ -81,6 +84,34 @@ export function MessageBubble({ message }: Props) {
               <Text style={styles.panelRowKind}>Goal</Text>
               <Text style={styles.panelRowId}>{gid.slice(0, 8)}…</Text>
             </Pressable>
+          ))}
+        </View>
+      ) : null}
+      {learning.hasAny ? (
+        <Pressable
+          onPress={() => setLearningExpanded((v) => !v)}
+          style={styles.learn}
+        >
+          <Text style={styles.learnText}>
+            ✦ {learningHeadline(learning)}
+            {learningExpanded ? ' ▴' : ' ▾'}
+          </Text>
+        </Pressable>
+      ) : null}
+      {learning.hasAny && learningExpanded ? (
+        <View style={styles.learnPanel}>
+          {learning.items.map((it) => (
+            <View key={it.id} style={styles.panelRow}>
+              <Text
+                style={[
+                  styles.learnLead,
+                  it.lead === 'acknowledged' ? styles.learnLeadAck : null,
+                ]}
+              >
+                {it.lead === 'acknowledged' ? 'Acknowledged' : 'Learned'}
+              </Text>
+              <Text style={styles.learnSummary}>{it.summary}</Text>
+            </View>
           ))}
         </View>
       ) : null}
@@ -143,4 +174,44 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   panelRowId: { fontSize: 12, color: '#4338ca', fontWeight: '600' },
+  learn: {
+    alignSelf: 'flex-start',
+    marginTop: 2,
+    marginBottom: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  learnText: {
+    fontSize: 11,
+    color: '#0e7490',
+    fontWeight: '700',
+  },
+  learnPanel: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#ecfeff',
+    borderRadius: 10,
+    padding: 8,
+    marginBottom: 6,
+    gap: 6,
+    maxWidth: '85%',
+  },
+  learnLead: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#0e7490',
+    backgroundColor: '#cffafe',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    textTransform: 'uppercase',
+  },
+  learnLeadAck: {
+    color: '#92400e',
+    backgroundColor: '#fef3c7',
+  },
+  learnSummary: {
+    flex: 1,
+    fontSize: 12,
+    color: '#164e63',
+  },
 });

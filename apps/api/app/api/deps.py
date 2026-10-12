@@ -167,6 +167,7 @@ def conversation_service_dep(
     context_builder: ContextBuilderDep,
     goal_service: GoalServiceDep,
     intent_detector: IntentDetectorDep,
+    evolution: EvolutionServiceDep,
 ) -> ConversationService:
     return ConversationService(
         session,
@@ -180,6 +181,7 @@ def conversation_service_dep(
         goal_service=goal_service,
         intent_detector=intent_detector,
         settings=settings,
+        evolution_service=evolution,
     )
 
 

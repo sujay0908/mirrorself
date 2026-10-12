@@ -35,6 +35,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -75,6 +76,13 @@ class TwinEvolutionEvent(Base, UUIDPKMixin):
             "twin_id",
             "created_at",
         ),
+        # Sprint 10: forward-only surface read is `WHERE twin_id = ?
+        # AND seq > cursor ORDER BY seq`. This index serves it directly.
+        Index(
+            "ix_twin_evolution_events_twin_seq",
+            "twin_id",
+            "seq",
+        ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
@@ -110,6 +118,17 @@ class TwinEvolutionEvent(Base, UUIDPKMixin):
     # Short derived summary — IDs and safe metadata only. Never raw
     # content. 255 is a hard structural ceiling, not a style guideline.
     summary: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Sprint 10: monotonic, gap-tolerant ordering key. Drawn from the
+    # dedicated `twin_evolution_events_seq` sequence at INSERT time on
+    # Postgres (under a per-twin advisory lock so commit order matches
+    # draw order per twin); assigned MAX(seq)+1 on SQLite in the test
+    # harness, which is single-writer by construction. It is the cursor
+    # the chat-time learning acknowledgement advances through — never
+    # `created_at`, which is transaction_timestamp() and so is not a
+    # reliable order under out-of-order commits. Always set by
+    # EvolutionService.record(); no server_default here because the
+    # value is assigned explicitly per dialect in the service.
+    seq: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

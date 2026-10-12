@@ -75,10 +75,35 @@ export interface GoalsContextMeta {
   goal_ids: UUID[];
 }
 
+/**
+ * Sprint 10: one confirmed Twin-evolution event surfaced as a chat-time
+ * "learning" acknowledgement. `lead` is computed server-side:
+ * "learned" for a durable change that took effect, "acknowledged" for an
+ * insight (which is acknowledgement, not identity mutation). `summary`
+ * is IDs/safe-metadata only — never raw content.
+ */
+export interface LearningItem {
+  id: UUID;
+  event_type: string;
+  lead: 'learned' | 'acknowledged';
+  summary: string;
+  seq: number;
+}
+
+export interface LearningMeta {
+  count: number;
+  acknowledged_up_to_seq: number;
+  has_learned: boolean;
+  has_acknowledged: boolean;
+  items: LearningItem[];
+}
+
 export interface MessageMetadata {
   finish_reason?: string | null;
   retrieval?: RetrievalMeta;
   goals_context?: GoalsContextMeta;
+  /** Sprint 10: null/absent when nothing new was acknowledged this turn. */
+  learning?: LearningMeta | null;
   [key: string]: unknown;
 }
 

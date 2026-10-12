@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import time
 import uuid
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -42,6 +43,9 @@ from app.conversation.pipeline import run_pipeline
 from app.conversation.policy import ContextPolicy, policy_for
 from app.conversation.schemas import ConversationCreateIn
 from app.conversation.state import TwinState
+from app.evolution.acknowledgement import ACK_SURFACE_LIMIT, compose_learning
+from app.evolution.locks import acquire_twin_evolution_lock
+from app.evolution.service import EvolutionService
 from app.goal.models import Goal
 from app.goal.service import GoalService
 from app.llm.interface import LLMProvider
@@ -81,6 +85,7 @@ class ConversationService:
         goal_service: GoalService | None = None,
         intent_detector: IntentDetector | None = None,
         settings: Settings | None = None,
+        evolution_service: EvolutionService | None = None,
     ) -> None:
         self._session = session
         self._provider = provider
@@ -98,6 +103,11 @@ class ConversationService:
         # keep working; the scheduler is only enqueued when settings
         # AND sessionmaker AND task_runner are all wired.
         self._settings = settings
+        # Sprint 10: owner-scoped reader/cursor-advancer for
+        # twin_evolution_events. Nullable so unit tests that construct
+        # ConversationService without it keep working; the chat-time
+        # learning acknowledgement is a no-op when not wired.
+        self._evolution_service = evolution_service
 
     async def list_for_twin(self, twin: Twin) -> list[Conversation]:
         stmt = (
@@ -212,6 +222,17 @@ class ConversationService:
             twin_state=twin_state,
         )
 
+        # Sprint 10: chat-time learning acknowledgement. Surfaces
+        # confirmed Twin-evolution events the user has not seen yet and
+        # advances the twin's acknowledgement cursor — both inside the
+        # SAME transaction that persists the twin message below, so the
+        # chip the user sees and the cursor advance commit atomically.
+        # Never raises into the chat path.
+        learning = await self._acknowledge_learning_safely(
+            twin=twin,
+            conversation_id=conv.id,
+        )
+
         twin_msg = Message(
             conversation_id=conv.id,
             role="twin",
@@ -235,6 +256,10 @@ class ConversationService:
                     "goal_ids": [str(g.id) for g in active_goals],
                 },
                 "twin_state": twin_state.to_metadata(),
+                # Sprint 10: null when nothing new to acknowledge or the
+                # ack path is not wired. The mobile client reads this via
+                # the generic metadata_json passthrough.
+                "learning": learning,
             },
         )
         self._session.add(twin_msg)
@@ -262,6 +287,7 @@ class ConversationService:
             memory_limit=policy.memory_limit,
             goal_limit=policy.goal_limit,
             history_turns=policy.history_turns,
+            learning_surfaced=(learning["count"] if learning else 0),
         )
 
         self._enqueue_memory_extraction(
@@ -457,6 +483,87 @@ class ConversationService:
                 twin_id=str(twin.id),
             )
             return [], False, f"unhandled:{type(exc).__name__}"
+
+    async def _acknowledge_learning_safely(
+        self,
+        *,
+        twin: Twin,
+        conversation_id: uuid.UUID,
+    ) -> dict[str, Any] | None:
+        """Surface unacknowledged Twin-evolution events and advance the cursor.
+
+        Returns a `learning` metadata block (or `None` when there is
+        nothing to surface, the ack reader is not wired, or the lookup
+        failed). The cursor advance (`twin.last_acknowledged_evolution_seq`)
+        is left pending on the session so it flushes with the twin-message
+        insert at `post_message`'s single commit — the chip and the cursor
+        move atomically.
+
+        Lock / isolation shape (Sprint 10, Corrections 6/9/12/13):
+
+        - The per-twin evolution advisory lock is acquired inside a
+          SAVEPOINT and the SAVEPOINT is RELEASED on success, which
+          promotes the (transaction-level) lock to the outer chat
+          transaction — so it is held through the cursor advance and
+          commit, serializing concurrent chats for the same twin and
+          preventing a double-surface. On any failure the SAVEPOINT is
+          rolled back (releasing the lock and undoing the read) and the
+          outer chat transaction stays usable, so the twin message still
+          persists. The ack never fails the chat.
+        - On Postgres a short `lock_timeout` bounds the wait so a chat
+          never hangs on a concurrent holder (or a migration's ACCESS
+          EXCLUSIVE); on timeout the turn simply carries no chip and the
+          next turn surfaces the backlog. No-op on SQLite.
+        """
+        if self._evolution_service is None:
+            return None
+        events: list[Any] = []
+        try:
+            async with self._session.begin_nested():
+                if self._session.bind is not None and (
+                    self._session.bind.dialect.name == "postgresql"
+                ):
+                    await self._session.execute(text("SET LOCAL lock_timeout = '2s'"))
+                await acquire_twin_evolution_lock(self._session, twin.id)
+                # Defeat stale ORM state: the twin was loaded (and its
+                # cursor read) BEFORE we held the advisory lock, so a
+                # concurrent chat that advanced the cursor and committed
+                # while we waited for the lock would otherwise be invisible
+                # to us — and we would re-surface the same events (a
+                # double-surface). Re-read the cursor now that we hold the
+                # lock, under READ COMMITTED, so the surface query filters
+                # on the current committed high-water mark.
+                await self._session.refresh(
+                    twin, attribute_names=["last_acknowledged_evolution_seq"]
+                )
+                events = list(
+                    await self._evolution_service.unacknowledged_for_twin(
+                        twin, limit=ACK_SURFACE_LIMIT
+                    )
+                )
+        except Exception as exc:
+            logger.warning(
+                "conversation.learning_ack.lookup_failed",
+                conversation_id=str(conversation_id),
+                twin_id=str(twin.id),
+                error=type(exc).__name__,
+            )
+            return None
+
+        learning = compose_learning(events)
+        if learning is None:
+            return None
+        # Advance the cursor in the OUTER transaction so it commits with
+        # the twin message. Never moves backward.
+        twin.last_acknowledged_evolution_seq = int(learning["acknowledged_up_to_seq"])
+        logger.info(
+            "conversation.learning_ack.surfaced",
+            conversation_id=str(conversation_id),
+            twin_id=str(twin.id),
+            count=learning["count"],
+            up_to_seq=learning["acknowledged_up_to_seq"],
+        )
+        return learning
 
     def _enqueue_memory_extraction(
         self,

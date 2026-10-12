@@ -41,6 +41,9 @@ dev = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+markers = [
+    "postgres: requires a real PostgreSQL backend (set PAT_TEST_PG_DSN to a postgresql+asyncpg:// DSN); skipped otherwise. Covers advisory-lock seq ordering, the out-of-order-commit scenario, and the migration boundary, which SQLite cannot exercise.",
+]
 filterwarnings = [
     "ignore::DeprecationWarning:jose.*",
 ]

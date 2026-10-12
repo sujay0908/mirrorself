@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, Uuid
+from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, String, Text, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
@@ -39,6 +39,21 @@ class Twin(Base, UUIDPKMixin, TimestampMixin):
     # error paths. See docs/architecture/evolving-twin-loop.md.
     last_reflection_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    # Sprint 10: high-water mark of the last twin_evolution_events row
+    # surfaced to the user as a chat-time "learning" acknowledgement.
+    # `0` means nothing acknowledged yet; every real event has
+    # `seq >= 1` (see EvolutionService.record), so a brand-new twin
+    # surfaces all of its own post-creation events on the next chat and
+    # never replays pre-existing history. The chat ack path advances
+    # this inside the SAME transaction that persists the twin message,
+    # so "the user saw the chip" and "the cursor advanced" are atomic.
+    # See docs/architecture/chat-time-learning-ack.md.
+    last_acknowledged_evolution_seq: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
     )
 
     profile: Mapped[TwinProfile] = relationship(

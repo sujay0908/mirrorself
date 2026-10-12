@@ -15,6 +15,26 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+    services:
+      # PostgreSQL for the Sprint 10 `postgres`-marked tests (advisory-lock
+      # seq ordering, the out-of-order-commit scenario, migration boundary,
+      # migration lock-order deadlock regression, concurrent-chat exactly-once,
+      # and the downgrade round-trip). Without this they skip. pgvector is
+      # provided by the pgvector image so the Alembic chain (memory_embeddings
+      # VECTOR column) applies.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -39,4 +59,7 @@ jobs:
           LLM_PROVIDER: mock
           LLM_MODEL: mock-echo
           DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+          # Enables the `postgres`-marked tests against the service above.
+          # TCP DSN (the test helpers also accept a unix-socket DSN locally).
+          PAT_TEST_PG_DSN: "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
         run: pytest -q

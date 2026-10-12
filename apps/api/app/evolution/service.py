@@ -21,9 +21,10 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.evolution.locks import acquire_twin_evolution_lock
 from app.evolution.models import EVOLUTION_EVENT_TYPES, TwinEvolutionEvent
 from app.observability.logging import get_logger
 from app.twin.models import Twin
@@ -32,6 +33,37 @@ logger = get_logger(__name__)
 
 
 _SUMMARY_MAX = 255
+
+# Name of the Postgres sequence created by migration 0007. The service
+# draws from it explicitly (rather than via a column server_default) so
+# the draw happens while the per-twin advisory lock is held, pinning
+# commit order to seq order per twin.
+_SEQ_NAME = "twin_evolution_events_seq"
+
+
+async def _next_seq(session: AsyncSession, twin_id: uuid.UUID) -> int:
+    """Assign the next monotonic `seq` for an evolution-event insert.
+
+    PostgreSQL: take the per-twin evolution advisory lock (so no other
+    writer for this twin can draw a seq until we commit), then draw from
+    the dedicated sequence. The lock makes commit order match draw order
+    per twin, which is what keeps the chat acknowledgement cursor from
+    ever stepping over an event that becomes visible out of draw order.
+
+    SQLite (test harness): single-writer by construction, so a plain
+    MAX(seq)+1 is deterministic and monotonic. No advisory lock exists.
+    """
+    bind = session.bind
+    if bind is not None and bind.dialect.name == "postgresql":
+        await acquire_twin_evolution_lock(session, twin_id)
+        result = await session.execute(text(f"SELECT nextval('{_SEQ_NAME}')"))
+        return int(result.scalar_one())
+    current_max = (
+        await session.execute(
+            select(func.coalesce(func.max(TwinEvolutionEvent.seq), 0))
+        )
+    ).scalar_one()
+    return int(current_max) + 1
 
 
 class EvolutionService:
@@ -56,6 +88,10 @@ class EvolutionService:
         # choice — a longer summary almost certainly leaked content.
         if len(summary) > _SUMMARY_MAX:
             summary = summary[: _SUMMARY_MAX - 1] + "…"
+        # Sprint 10: draw the monotonic `seq` (under the per-twin
+        # advisory lock on Postgres) before building the row, so commit
+        # order matches seq order per twin.
+        seq = await _next_seq(self._session, twin.id)
         row = TwinEvolutionEvent(
             user_id=twin.user_id,
             twin_id=twin.id,
@@ -65,6 +101,7 @@ class EvolutionService:
             goal_id=goal_id,
             profile_field=profile_field,
             summary=summary,
+            seq=seq,
         )
         self._session.add(row)
         await self._session.flush()
@@ -72,6 +109,7 @@ class EvolutionService:
             "twin.evolution.created",
             twin_id=str(twin.id),
             event_id=str(row.id),
+            seq=row.seq,
             event_type=event_type,
             reflection_id=str(reflection_id) if reflection_id else None,
             memory_id=str(memory_id) if memory_id else None,
@@ -97,6 +135,32 @@ class EvolutionService:
                 TwinEvolutionEvent.created_at.desc(),
                 TwinEvolutionEvent.id.asc(),
             )
+            .limit(limit)
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def unacknowledged_for_twin(
+        self,
+        twin: Twin,
+        *,
+        limit: int,
+    ) -> Sequence[TwinEvolutionEvent]:
+        """Oldest-first slice of evolution events not yet acknowledged.
+
+        "Not yet acknowledged" = `seq` strictly greater than the twin's
+        `last_acknowledged_evolution_seq` cursor. Ordered by `seq`
+        ascending so the caller surfaces events in the order they were
+        learned and advances the cursor to the slice's max seq. Owner-
+        scoped by `(twin_id, user_id)`.
+        """
+        stmt = (
+            select(TwinEvolutionEvent)
+            .where(
+                TwinEvolutionEvent.twin_id == twin.id,
+                TwinEvolutionEvent.user_id == twin.user_id,
+                TwinEvolutionEvent.seq > twin.last_acknowledged_evolution_seq,
+            )
+            .order_by(TwinEvolutionEvent.seq.asc())
             .limit(limit)
         )
         return (await self._session.execute(stmt)).scalars().all()
