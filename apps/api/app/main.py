@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import __version__
 from app.api.v1.router import v1_router
 from app.common.errors import register_exception_handlers
-from app.config import get_settings
+from app.config import get_settings, validate_runtime_config
 from app.observability.logging import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -21,6 +21,16 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level)
+    # Fail fast in staging/prod on unsafe/incomplete config (SQLite in
+    # prod, missing real-provider SDK/credentials, unsupported provider)
+    # rather than booting "healthy" and 500-ing on the first chat.
+    # No-op in dev/test. Raises ConfigurationError → startup aborts.
+    validate_runtime_config()
+    if settings.app_env in ("staging", "prod") and settings.embedding_provider == "mock":
+        logger.warning(
+            "api.config.mock_embeddings_in_production",
+            detail="EMBEDDING_PROVIDER=mock degrades semantic memory retrieval",
+        )
     logger.info(
         "api.startup",
         version=__version__,

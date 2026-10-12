@@ -89,3 +89,85 @@ def get_settings() -> Settings:
 def reset_settings_cache() -> None:
     """Clear the cache. Test-only."""
     get_settings.cache_clear()
+
+
+class ConfigurationError(RuntimeError):
+    """Raised at startup when staging/prod configuration is unsafe or
+    incomplete. Carries a human-actionable message and never a secret
+    value."""
+
+
+# LLM providers that only ever make sense in local dev / tests. Selecting
+# one of these in staging/prod would silently turn the Twin into an echo
+# bot, so the validator rejects them rather than booting "healthy".
+_DEV_ONLY_LLM_PROVIDERS: frozenset[str] = frozenset({"mock", "local"})
+
+_PRODUCTION_ENVS: frozenset[str] = frozenset({"staging", "prod"})
+
+
+def validate_runtime_config() -> None:
+    """Fail fast in staging/prod on unsafe or incomplete configuration.
+
+    No-op in ``dev``/``test`` so local development and the test suite keep
+    working with mock/local providers and SQLite fixtures. It also does
+    nothing at import time or during unit-test collection — it runs only
+    when called from the application lifespan (see ``app.main``).
+
+    Reuses the existing provider registry as the single source of truth for
+    "which provider needs which SDK / credential": it simply constructs the
+    configured providers and lets the registry raise its own clear errors.
+    Never includes a secret value (or the full ``DATABASE_URL``) in the
+    message — only the URL scheme and curated registry errors.
+    """
+    settings = get_settings()
+    if settings.app_env not in _PRODUCTION_ENVS:
+        return
+
+    # Lazy import to avoid a config <-> registry import cycle.
+    from app.llm.registry import get_embedding_provider, get_llm_provider
+
+    problems: list[str] = []
+
+    # ---- Database: must be real PostgreSQL, never SQLite/in-memory ----
+    db_url = settings.database_url
+    scheme = db_url.split("://", 1)[0] if "://" in db_url else db_url
+    if db_url.startswith("sqlite") or ":memory:" in db_url:
+        problems.append(
+            "DATABASE_URL is a SQLite/in-memory URL; staging/prod requires a "
+            "PostgreSQL asyncpg URL (postgresql+asyncpg://…). Running on "
+            "in-memory SQLite would silently lose all data on restart."
+        )
+    elif not scheme.startswith("postgresql"):
+        problems.append(
+            f"DATABASE_URL scheme {scheme!r} is not PostgreSQL; staging/prod "
+            "requires postgresql+asyncpg://…"
+        )
+
+    # ---- LLM provider: must be a real provider with SDK + credentials ----
+    if settings.llm_provider in _DEV_ONLY_LLM_PROVIDERS:
+        problems.append(
+            f"LLM_PROVIDER={settings.llm_provider!r} is development-only; "
+            "staging/prod requires a real provider (e.g. 'anthropic') with its "
+            "SDK installed and API key set."
+        )
+    else:
+        try:
+            get_llm_provider()
+        except Exception as exc:  # registry/provider raise curated, secret-free messages
+            problems.append(f"LLM provider {settings.llm_provider!r} is not usable: {exc}")
+
+    # ---- Embedding provider: the configured one must be constructible ----
+    # Mock embeddings are permitted (best-effort retrieval) but warned about,
+    # since they silently degrade semantic memory retrieval in production.
+    try:
+        get_embedding_provider()
+    except Exception as exc:
+        problems.append(
+            f"Embedding provider {settings.embedding_provider!r} is not usable: {exc}"
+        )
+
+    if problems:
+        raise ConfigurationError(
+            "Refusing to start: unsafe or incomplete "
+            f"{settings.app_env} configuration.\n- " + "\n- ".join(problems)
+        )

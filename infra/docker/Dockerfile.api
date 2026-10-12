@@ -15,11 +15,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY apps/api/pyproject.toml ./apps/api/pyproject.toml
 WORKDIR /srv/apps/api
 
-# `pip install .` reads pyproject.toml.
+# `pip install .` reads pyproject.toml. Install the OPTIONAL provider
+# extras the production stack needs, or the image can only run the
+# mock provider and real chat/embeddings fail at the first request:
+#   - [anthropic] → the intended production LLM provider (LLM_PROVIDER=anthropic).
+#   - [openai]    → the only real embedding provider (EMBEDDING_PROVIDER=openai),
+#                   required for real semantic memory retrieval.
+# Keep both so the image supports the documented production stack
+# regardless of which embedding provider is configured; the runtime
+# config validator (app.config.validate_runtime_config) enforces that
+# the *configured* provider's SDK and credentials are actually present.
+# No API keys are baked in — credentials come from the environment at run time.
 RUN pip install --upgrade pip \
-    && pip install .
+    && pip install ".[anthropic,openai]"
 
 COPY apps/api ./
 
+# Run as an unprivileged user. The app writes nothing to disk (logs go to
+# stdout), so read access to the root-owned, world-readable source is enough.
+RUN useradd --create-home --uid 1001 appuser
+USER appuser
+
+# Cloud Run (and most platforms) inject $PORT; honour it with a safe
+# local default of 8000. `exec` makes uvicorn PID 1 for clean signals.
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
