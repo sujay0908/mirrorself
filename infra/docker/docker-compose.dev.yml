@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: pat-postgres
     restart: unless-stopped
     environment:
@@ -34,6 +34,8 @@ services:
       context: ../..
       dockerfile: infra/docker/Dockerfile.api
     container_name: pat-api
+    env_file:
+      - .env.dev
     depends_on:
       postgres:
         condition: service_healthy
