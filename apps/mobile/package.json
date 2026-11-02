@@ -8,7 +8,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "build:web": "node ./scripts/check-web-env.js && expo export --platform web --output-dir dist",
+    "build:web": "node ./scripts/check-web-env.js && expo export --platform web --output-dir dist && node ./scripts/verify-web-bundle.js",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'TODO: expo lint' && exit 0",
     "test": "jest --passWithNoTests"
