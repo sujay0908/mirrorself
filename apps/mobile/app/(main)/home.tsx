@@ -4,9 +4,10 @@
  * links into the Memories, Candidates and Goals surfaces.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useReducer, useState } from 'react';
 import {
   ActivityIndicator,
+  Button,
   FlatList,
   Pressable,
   StyleSheet,
@@ -16,29 +17,74 @@ import {
 import { useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
-import type { Conversation } from '@/api/types';
+import { apiFailureMessage, logApiFailure, type ApiFailure } from '@/api/diagnostics';
+import { config } from '@/config';
+import {
+  CONVERSATIONS_INITIAL,
+  conversationListReducer,
+} from '@/state/conversation-list';
 import { useSession } from '@/state/session';
 
 export default function HomeScreen() {
   const router = useRouter();
   const twin = useSession((s) => s.twin);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [state, dispatch] = useReducer(
+    conversationListReducer,
+    CONVERSATIONS_INITIAL,
+  );
+  // Bumped by the retry button; re-runs the effect without duplicating it.
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [creating, setCreating] = useState(false);
+  const [createFailure, setCreateFailure] = useState<ApiFailure | null>(null);
 
   useEffect(() => {
+    // `cancelled` keeps a slow response from a previous attempt from
+    // overwriting the state of the current one after a retry.
+    let cancelled = false;
+    dispatch({ type: 'load' });
     api
       .listConversations()
-      .then((res) => setConversations(res.items))
-      .finally(() => setLoading(false));
-  }, []);
+      .then((res) => {
+        if (!cancelled) dispatch({ type: 'loaded', items: res.items });
+      })
+      .catch((err: unknown) => {
+        // An explicit rejection handler, not `.finally`: `.finally` re-throws,
+        // which surfaced as an unhandled promise rejection and left the list
+        // silently empty whenever the API was unreachable or rejected the
+        // session.
+        if (!cancelled) {
+          dispatch({
+            type: 'failed',
+            failure: logApiFailure('GET /v1/conversations', err),
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAttempt]);
 
-  async function newConversation() {
-    const created = await api.createConversation();
-    router.push({
-      pathname: '/(main)/chat/[id]',
-      params: { id: created.id },
-    });
-  }
+  const retry = useCallback(() => setLoadAttempt((n) => n + 1), []);
+
+  // Not an async onPress handler: a rejected createConversation() there is
+  // unhandled for exactly the same reason.
+  const newConversation = useCallback(() => {
+    if (creating) return;
+    setCreating(true);
+    setCreateFailure(null);
+    api
+      .createConversation()
+      .then((created) => {
+        router.push({
+          pathname: '/(main)/chat/[id]',
+          params: { id: created.id },
+        });
+      })
+      .catch((err: unknown) => {
+        setCreateFailure(logApiFailure('POST /v1/conversations', err));
+      })
+      .finally(() => setCreating(false));
+  }, [creating, router]);
 
   return (
     <View style={styles.container}>
@@ -92,11 +138,19 @@ export default function HomeScreen() {
         </Pressable>
       </View>
 
-      {loading ? (
+      {state.status === 'loading' ? (
         <ActivityIndicator />
+      ) : state.status === 'failed' ? (
+        <View style={styles.error}>
+          <Text style={styles.errorTitle}>Could not load your conversations</Text>
+          <Text style={styles.errorBody}>
+            {apiFailureMessage(state.failure, config.apiUrl)}
+          </Text>
+          <Button title="Try again" onPress={retry} />
+        </View>
       ) : (
         <FlatList
-          data={conversations}
+          data={state.items}
           keyExtractor={(c) => c.id}
           renderItem={({ item }) => (
             <Pressable
@@ -121,8 +175,19 @@ export default function HomeScreen() {
           }
         />
       )}
-      <Pressable style={styles.fab} onPress={newConversation}>
-        <Text style={styles.fabText}>+ New chat</Text>
+      {createFailure ? (
+        <Text style={styles.createError}>
+          {apiFailureMessage(createFailure, config.apiUrl)}
+        </Text>
+      ) : null}
+      <Pressable
+        style={[styles.fab, creating ? styles.fabDisabled : null]}
+        onPress={newConversation}
+        disabled={creating}
+      >
+        <Text style={styles.fabText}>
+          {creating ? 'Starting…' : '+ New chat'}
+        </Text>
       </Pressable>
     </View>
   );
@@ -154,6 +219,18 @@ const styles = StyleSheet.create({
   rowTitle: { fontSize: 16, fontWeight: '600' },
   rowMeta: { fontSize: 12, color: '#6b7280' },
   empty: { textAlign: 'center', marginTop: 40, color: '#6b7280' },
+  error: { marginTop: 32, paddingHorizontal: 8, gap: 8 },
+  errorTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  errorBody: { fontSize: 13, color: '#4b5563', textAlign: 'center' },
+  createError: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 80,
+    fontSize: 12,
+    color: '#b91c1c',
+    textAlign: 'right',
+  },
   fab: {
     position: 'absolute',
     right: 20,
@@ -163,5 +240,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 999,
   },
+  fabDisabled: { backgroundColor: '#a5b4fc' },
   fabText: { color: '#ffffff', fontWeight: '600' },
 });
