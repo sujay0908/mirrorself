@@ -8,9 +8,21 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import parse_qsl, urlencode
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# SQLAlchemy needs an explicit async driver; the app only ever speaks asyncpg.
+_ASYNC_PG_SCHEME = "postgresql+asyncpg"
+
+# Query parameters libpq understands but asyncpg does not. SQLAlchemy forwards
+# unknown query parameters to ``asyncpg.connect()`` as keyword arguments, so
+# leaving these in raises TypeError at the first connection instead of
+# connecting.
+_LIBPQ_ONLY_PARAMS = frozenset(
+    {"sslmode", "channel_binding", "gssencmode", "target_session_attrs"}
+)
 
 
 class Settings(BaseSettings):
@@ -70,6 +82,41 @@ class Settings(BaseSettings):
 
     # ---- CORS ----
     cors_allow_origins: str = "http://localhost:8081,http://localhost:19006"
+
+    @field_validator("database_url")
+    @classmethod
+    def _normalise_database_url(cls, value: str) -> str:
+        """Accept the URL shape managed Postgres providers actually hand out.
+
+        Render, Railway, Heroku and Fly all expose ``postgres://…``, usually
+        with ``?sslmode=require``. Neither form is usable here: the runtime
+        validator requires a ``postgresql`` scheme, SQLAlchemy requires an
+        explicit async driver, and asyncpg rejects libpq-only parameters.
+        Normalising at the edge means DATABASE_URL can be injected verbatim
+        from any provider's secret store, so the deployed URL is never
+        hand-edited (and so never silently wrong after a password rotation).
+
+        Non-PostgreSQL URLs (the SQLite test fixtures) are returned untouched.
+        """
+        if "://" not in value:
+            return value
+        scheme, rest = value.split("://", 1)
+        if scheme.split("+", 1)[0].lower() not in {"postgres", "postgresql"}:
+            return value
+        # An explicitly chosen driver is honoured; only a bare scheme is filled in.
+        new_scheme = scheme if "+" in scheme else _ASYNC_PG_SCHEME
+        if "?" in rest:
+            location, query = rest.split("?", 1)
+            kept: list[tuple[str, str]] = []
+            for key, val in parse_qsl(query, keep_blank_values=True):
+                lowered = key.lower()
+                if lowered == "sslmode":
+                    # asyncpg spells this "ssl"; the values line up.
+                    kept.append(("ssl", val))
+                elif lowered not in _LIBPQ_ONLY_PARAMS:
+                    kept.append((key, val))
+            rest = location + (f"?{urlencode(kept)}" if kept else "")
+        return f"{new_scheme}://{rest}"
 
     @property
     def cors_origins_list(self) -> list[str]:

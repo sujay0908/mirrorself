@@ -1,0 +1,60 @@
+# Render Blueprint for the MirrorSelf AI backend.
+#
+# Deploys the FastAPI service from the existing production Dockerfile and
+# provisions the Postgres it needs. Auth stays on Supabase; only application
+# data lives here, so the database sits in the same region as the API rather
+# than a round trip away.
+#
+# Secrets are never stored in this file. Every `sync: false` value must be
+# entered once in the Render dashboard.
+databases:
+  - name: mirrorself-db
+    databaseName: mirrorself
+    user: mirrorself
+    plan: free
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: mirrorself-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./infra/docker/Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /v1/health
+    # Migrations run before the server binds. `alembic upgrade head` is
+    # idempotent, so a restart or a cold start is a no-op once the schema is
+    # current. Keep `exec` so uvicorn stays PID 1 and receives signals.
+    dockerCommand: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: APP_ENV
+        value: prod
+      - key: LOG_LEVEL
+        value: INFO
+      # Render emits `postgres://…`; app.config normalises it to
+      # postgresql+asyncpg:// so it can be injected verbatim.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mirrorself-db
+          property: connectionString
+      # Supabase remains the identity provider; the API only reads its JWKS.
+      - key: SUPABASE_JWT_JWKS_URL
+        value: https://ihygwqrqkvkwlpzjrhdg.supabase.co/auth/v1/.well-known/jwks.json
+      - key: SUPABASE_JWT_AUDIENCE
+        value: authenticated
+      - key: LLM_PROVIDER
+        value: anthropic
+      - key: LLM_MODEL
+        value: claude-sonnet-4-5-20250929
+      # Startup aborts without this: a dev-only provider is rejected in prod.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # `mock` degrades semantic memory retrieval and is warned about at
+      # startup. Switch to `openai` once OPENAI_API_KEY is set.
+      - key: EMBEDDING_PROVIDER
+        value: mock
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CORS_ALLOW_ORIGINS
+        value: https://timeismetime.com

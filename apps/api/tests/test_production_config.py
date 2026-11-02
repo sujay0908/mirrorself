@@ -270,3 +270,100 @@ def test_local_provider_stays_a_dev_only_shortcut(
         EMBEDDING_PROVIDER="mock",
     )
     validate_runtime_config()  # no raise
+
+
+# --------------------------------------------------------------------------
+# DATABASE_URL NORMALISATION
+#
+# Managed Postgres providers (Render, Railway, Heroku, Fly) expose
+# `postgres://…`, usually with `?sslmode=require`. That URL is unusable as
+# given: the production validator demands a `postgresql` scheme, SQLAlchemy
+# demands an explicit async driver, and asyncpg raises TypeError on libpq-only
+# query parameters. Normalising lets the provider's secret store be injected
+# verbatim.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # Bare provider scheme gets the async driver.
+        (
+            "postgres://u:p@h:5432/db",
+            "postgresql+asyncpg://u:p@h:5432/db",
+        ),
+        (
+            "postgresql://u:p@h:5432/db",
+            "postgresql+asyncpg://u:p@h:5432/db",
+        ),
+        # libpq's sslmode is translated to the name asyncpg uses.
+        (
+            "postgres://u:p@h:5432/db?sslmode=require",
+            "postgresql+asyncpg://u:p@h:5432/db?ssl=require",
+        ),
+        # libpq-only parameters asyncpg cannot accept are dropped.
+        (
+            "postgres://u:p@h/db?channel_binding=require&target_session_attrs=rw",
+            "postgresql+asyncpg://u:p@h/db",
+        ),
+        # An explicit driver is the caller's choice and is left alone.
+        (
+            "postgresql+asyncpg://u:p@h/db",
+            "postgresql+asyncpg://u:p@h/db",
+        ),
+        # Non-PostgreSQL URLs (the test fixtures) are untouched.
+        (
+            "sqlite+aiosqlite:///:memory:",
+            "sqlite+aiosqlite:///:memory:",
+        ),
+    ],
+)
+def test_database_url_is_normalised_for_managed_providers(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: str
+) -> None:
+    _set_env(
+        monkeypatch,
+        APP_ENV="dev",
+        DATABASE_URL=raw,
+        LLM_PROVIDER="mock",
+        EMBEDDING_PROVIDER="mock",
+    )
+    assert get_settings().database_url == expected
+
+
+def test_normalisation_preserves_unrelated_query_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_env(
+        monkeypatch,
+        APP_ENV="dev",
+        DATABASE_URL="postgres://u:p@h/db?application_name=twin&sslmode=require",
+        LLM_PROVIDER="mock",
+        EMBEDDING_PROVIDER="mock",
+    )
+    url = get_settings().database_url
+    assert url.startswith("postgresql+asyncpg://u:p@h/db?")
+    assert "application_name=twin" in url
+    assert "ssl=require" in url
+    assert "sslmode" not in url
+
+
+def test_a_providers_raw_url_now_satisfies_production_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The point of the whole exercise: a URL copied straight out of a
+    provider's secret store must pass prod validation, not be rejected for
+    its scheme."""
+    _set_env(
+        monkeypatch,
+        APP_ENV="prod",
+        DATABASE_URL="postgres://u:p@h:5432/db?sslmode=require",
+        LLM_PROVIDER="mock",  # still dev-only -> prod must still reject THIS
+        EMBEDDING_PROVIDER="mock",
+    )
+    with pytest.raises(ConfigurationError) as excinfo:
+        validate_runtime_config()
+    message = str(excinfo.value)
+    # The database is no longer a complaint; only the dev-only LLM provider is.
+    assert "DATABASE_URL" not in message
+    assert "development-only" in message
