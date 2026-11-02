@@ -1,19 +1,19 @@
 # Render Blueprint for the MirrorSelf AI backend.
 #
-# Deploys the FastAPI service from the existing production Dockerfile and
-# provisions the Postgres it needs. Auth stays on Supabase; only application
-# data lives here, so the database sits in the same region as the API rather
-# than a round trip away.
+# Deploys the FastAPI service from the existing production Dockerfile. Auth
+# stays on Supabase; only application data lives in DATABASE_URL.
 #
-# Secrets are never stored in this file. Every `sync: false` value must be
-# entered once in the Render dashboard.
-databases:
-  - name: mirrorself-db
-    databaseName: mirrorself
-    user: mirrorself
-    plan: free
-    postgresMajorVersion: "16"
-
+# NO `databases:` BLOCK ON PURPOSE.
+# Render's free Postgres expires 30 days after creation; after a 14-day grace
+# period Render deletes the database and all of its data, and it has no
+# backups. Twin memories are the product, so they must not sit on storage with
+# a deletion date. DATABASE_URL is therefore supplied as a secret pointing at a
+# persistent Postgres with pgvector — Neon's free plan ("None of these limits
+# delete your data") or a paid Render Postgres instance, which can be added
+# here later once it is a paid plan.
+#
+# No secret is stored in this file: every `sync: false` value is entered once
+# in the Render dashboard.
 services:
   - type: web
     name: mirrorself-api
@@ -24,20 +24,19 @@ services:
     dockerContext: .
     healthCheckPath: /v1/health
     # Migrations run before the server binds. `alembic upgrade head` is
-    # idempotent, so a restart or a cold start is a no-op once the schema is
-    # current. Keep `exec` so uvicorn stays PID 1 and receives signals.
+    # idempotent, so a restart or a free-tier cold start is a no-op once the
+    # schema is current. Keep `exec` so uvicorn stays PID 1 for signals.
     dockerCommand: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: APP_ENV
         value: prod
       - key: LOG_LEVEL
         value: INFO
-      # Render emits `postgres://…`; app.config normalises it to
-      # postgresql+asyncpg:// so it can be injected verbatim.
+      # A persistent PostgreSQL URL with pgvector available. app.config
+      # normalises `postgres://…?sslmode=require` to postgresql+asyncpg, so the
+      # provider's connection string can be pasted verbatim.
       - key: DATABASE_URL
-        fromDatabase:
-          name: mirrorself-db
-          property: connectionString
+        sync: false
       # Supabase remains the identity provider; the API only reads its JWKS.
       - key: SUPABASE_JWT_JWKS_URL
         value: https://ihygwqrqkvkwlpzjrhdg.supabase.co/auth/v1/.well-known/jwks.json
