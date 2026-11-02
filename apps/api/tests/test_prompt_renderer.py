@@ -247,3 +247,55 @@ def test_context_to_system_prompt_matches_renderer() -> None:
     g = _goal("00000003", title="A goal")
     ctx = ContextBuilder().build(twin, retrieved=[r], recent_messages=[], active_goals=[g])
     assert ctx.to_system_prompt() == render_system_prompt(ctx)
+
+
+# ----------------------------------------------------------------------
+# First-person persona — the twin speaks AS the person, not about them
+# ----------------------------------------------------------------------
+
+
+def test_renderer_addresses_the_twin_in_the_first_person() -> None:
+    """The twin is the person, not an assistant that knows about them."""
+    twin = _twin(name="Sujay")
+    ctx = ContextBuilder().build(twin, retrieved=[], recent_messages=[])
+    out = render_system_prompt(ctx)
+    assert "You are Sujay." in out
+    assert "speak in the first person" in out
+
+
+def test_renderer_never_refers_to_the_person_as_the_user() -> None:
+    """Regression: the prompt used to open "You are the Personal AI Twin of
+    the user", which produced assistant-voice replies about the person
+    instead of replies as them. No third-person framing may come back."""
+    twin = _twin(name="Sujay", city="Hyderabad")
+    r = _retrieved("00000000-0000-0000-0000-00000000aaaa", content="A memory")
+    g = _goal("00000002", title="A goal", priority=1)
+    out = render_system_prompt(
+        ContextBuilder().build(twin, retrieved=[r], recent_messages=[], active_goals=[g])
+    )
+    assert "the user" not in out
+    assert "Personal AI Twin of" not in out
+
+
+def test_renderer_forbids_chatbot_mannerisms() -> None:
+    twin = _twin()
+    out = render_system_prompt(ContextBuilder().build(twin, retrieved=[], recent_messages=[]))
+    assert "not an assistant and not a chatbot" in out
+    assert "How can I help you?" in out  # named so the model avoids it
+    assert "Never announce that you are an AI" in out
+
+
+def test_renderer_keeps_the_twin_willing_to_disagree() -> None:
+    """A twin that only agrees is a mirror, not a copy."""
+    twin = _twin()
+    out = render_system_prompt(ContextBuilder().build(twin, retrieved=[], recent_messages=[]))
+    assert "Being a twin does not mean agreeing." in out
+
+
+def test_renderer_still_grounds_memory_in_the_first_person() -> None:
+    """First-person voice must not cost the anti-fabrication guarantee."""
+    twin = _twin()
+    out = render_system_prompt(ContextBuilder().build(twin, retrieved=[], recent_messages=[]))
+    assert "your own life" in out
+    assert "Do not invent facts." in out
+    assert "Do not fabricate." in out

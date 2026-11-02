@@ -23,8 +23,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings.log_level)
     # Fail fast in staging/prod on unsafe/incomplete config (SQLite in
     # prod, missing real-provider SDK/credentials, unsupported provider)
-    # rather than booting "healthy" and 500-ing on the first chat.
-    # No-op in dev/test. Raises ConfigurationError → startup aborts.
+    # rather than booting "healthy" and 500-ing on the first chat. In
+    # dev/test only the real-LLM-provider check runs.
+    # Raises ConfigurationError → startup aborts.
     validate_runtime_config()
     if settings.app_env in ("staging", "prod") and settings.embedding_provider == "mock":
         logger.warning(

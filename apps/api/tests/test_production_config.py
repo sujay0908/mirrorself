@@ -181,3 +181,92 @@ def test_test_env_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     validate_runtime_config()  # no raise
     assert get_settings().app_env == "test"
+
+
+# ---- dev: a REAL provider must still be usable at startup ----------------
+#
+# Local dev may select `anthropic`, so the no-op-in-dev rule cannot extend to
+# the provider credential check: without this, the API boots "healthy" and
+# every chat 500s. None of these use a real key.
+
+
+def test_dev_rejects_real_llm_provider_without_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_env(
+        monkeypatch,
+        APP_ENV="dev",
+        DATABASE_URL="sqlite+aiosqlite:///:memory:",
+        LLM_PROVIDER="anthropic",
+        EMBEDDING_PROVIDER="mock",
+    )
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    reset_settings_cache()
+    with pytest.raises(ConfigurationError) as excinfo:
+        validate_runtime_config()
+    msg = str(excinfo.value)
+    assert "LLM_PROVIDER='anthropic'" in msg
+    assert "ANTHROPIC_API_KEY" in msg
+
+
+def test_dev_accepts_real_llm_provider_once_credentials_are_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The key is never used to call anything here: the registry only needs a
+    # non-empty value to construct the provider. Stubbed so the test does not
+    # depend on the vendor SDK being installed.
+    _set_env(
+        monkeypatch,
+        APP_ENV="dev",
+        DATABASE_URL="sqlite+aiosqlite:///:memory:",
+        LLM_PROVIDER="anthropic",
+        EMBEDDING_PROVIDER="mock",
+        ANTHROPIC_API_KEY="placeholder-not-a-real-key",
+    )
+    monkeypatch.setattr(llm_registry, "get_llm_provider", lambda: object())
+    validate_runtime_config()  # no raise
+
+
+def test_dev_rejects_unknown_llm_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_env(
+        monkeypatch,
+        APP_ENV="dev",
+        DATABASE_URL="sqlite+aiosqlite:///:memory:",
+        LLM_PROVIDER="anthropik",  # typo in .env.dev must not boot silently
+        EMBEDDING_PROVIDER="mock",
+    )
+    with pytest.raises(ConfigurationError) as excinfo:
+        validate_runtime_config()
+    assert "anthropik" in str(excinfo.value)
+
+
+def test_dev_still_skips_the_database_and_embedding_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # SQLite + an uncredentialed embedding provider stay legal in dev; only
+    # the LLM provider check was added.
+    _set_env(
+        monkeypatch,
+        APP_ENV="dev",
+        DATABASE_URL="sqlite+aiosqlite:///:memory:",
+        LLM_PROVIDER="mock",
+        EMBEDDING_PROVIDER="openai",
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    reset_settings_cache()
+    validate_runtime_config()  # no raise
+
+
+def test_local_provider_stays_a_dev_only_shortcut(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 'local' is an unimplemented stub, so it must not be treated as real and
+    # must not be credential-checked in dev.
+    _set_env(
+        monkeypatch,
+        APP_ENV="dev",
+        DATABASE_URL="sqlite+aiosqlite:///:memory:",
+        LLM_PROVIDER="local",
+        EMBEDDING_PROVIDER="mock",
+    )
+    validate_runtime_config()  # no raise

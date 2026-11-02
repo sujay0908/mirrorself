@@ -108,10 +108,13 @@ _PRODUCTION_ENVS: frozenset[str] = frozenset({"staging", "prod"})
 def validate_runtime_config() -> None:
     """Fail fast in staging/prod on unsafe or incomplete configuration.
 
-    No-op in ``dev``/``test`` so local development and the test suite keep
-    working with mock/local providers and SQLite fixtures. It also does
-    nothing at import time or during unit-test collection — it runs only
-    when called from the application lifespan (see ``app.main``).
+    In ``dev``/``test`` the database and embedding checks are skipped so
+    local development and the test suite keep working with mock/local
+    providers and SQLite fixtures — but a real ``LLM_PROVIDER`` selected
+    there must still be constructible, so a missing SDK or API key fails at
+    startup instead of 500-ing on the first chat. It does nothing at import
+    time or during unit-test collection — it runs only when called from the
+    application lifespan (see ``app.main``).
 
     Reuses the existing provider registry as the single source of truth for
     "which provider needs which SDK / credential": it simply constructs the
@@ -121,6 +124,21 @@ def validate_runtime_config() -> None:
     """
     settings = get_settings()
     if settings.app_env not in _PRODUCTION_ENVS:
+        # dev/test stay permissive about SQLite and the mock/local providers.
+        # But if a REAL provider is selected here, it still has to be usable:
+        # otherwise the API boots "healthy" and every chat 500s on a missing
+        # SDK or API key, which is indistinguishable from a broken Twin.
+        if settings.llm_provider not in _DEV_ONLY_LLM_PROVIDERS:
+            from app.llm.registry import get_llm_provider as _get_llm_provider
+
+            try:
+                _get_llm_provider()
+            except Exception as exc:
+                # Registry/provider errors are curated and never echo a secret.
+                raise ConfigurationError(
+                    f"Refusing to start: LLM_PROVIDER={settings.llm_provider!r} "
+                    f"is not usable in {settings.app_env}: {exc}"
+                ) from exc
         return
 
     # Lazy import to avoid a config <-> registry import cycle.

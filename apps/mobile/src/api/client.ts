@@ -5,6 +5,7 @@
 
 import { supabase } from '@/auth/supabase';
 import { config } from '@/config';
+import { APIError } from './errors';
 import type {
   APIErrorBody,
   Conversation,
@@ -34,16 +35,7 @@ import type {
   UUID,
 } from './types';
 
-export class APIError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly code: string,
-    message: string,
-    public readonly details?: Record<string, unknown>,
-  ) {
-    super(message);
-  }
-}
+export { APIError } from './errors';
 
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -58,11 +50,30 @@ async function request<T>(
   body?: unknown,
 ): Promise<T> {
   const headers = await authHeaders();
-  const resp = await fetch(`${config.apiUrl}/v1${path}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.apiTimeoutMs);
+  let resp: Response;
+  try {
+    resp = await fetch(`${config.apiUrl}/v1${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    // Surface our own deadline as a typed error so every caller has a single
+    // error shape to branch on, instead of a raw AbortError.
+    if (controller.signal.aborted) {
+      throw new APIError(
+        408,
+        'timeout',
+        `No response from the API within ${config.apiTimeoutMs}ms.`,
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!resp.ok) {
     const raw: APIErrorBody = await resp.json().catch(() => ({
       error: { code: 'network_error', message: `HTTP ${resp.status}` },

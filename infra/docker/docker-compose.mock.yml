@@ -1,0 +1,17 @@
+# Local-only recovery override: run the API on the mock LLM provider.
+#
+# .env.dev keeps LLM_PROVIDER=anthropic as the intended configuration. This
+# file does not change it; it only overrides the provider for containers
+# started with BOTH -f flags, so the app stays usable while no Anthropic key
+# is configured.
+#
+#   docker compose -f docker-compose.dev.yml -f docker-compose.mock.yml \
+#     up -d --no-deps --build api
+#
+# A compose `environment:` entry wins over `env_file:` - that precedence is
+# what makes this override work.
+services:
+  api:
+    environment:
+      LLM_PROVIDER: mock
+      LLM_MODEL: mock-echo

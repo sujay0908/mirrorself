@@ -10,12 +10,14 @@ import {
   ActivityIndicator,
   Alert,
   Button,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
 
+import { magicLinkRedirectTo } from '@/auth/redirect';
 import { supabase } from '@/auth/supabase';
 
 export default function LoginScreen() {
@@ -31,7 +33,16 @@ export default function LoginScreen() {
     setLoading(true);
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { shouldCreateUser: true },
+      options: {
+        shouldCreateUser: true,
+        // Without this Supabase falls back to the project's Site URL, which in
+        // local development is usually not this dev server, so the link lands
+        // somewhere that cannot complete the sign-in.
+        emailRedirectTo: magicLinkRedirectTo(
+          Platform.OS,
+          typeof window !== 'undefined' ? window.location.origin : null,
+        ),
+      },
     });
     setLoading(false);
     if (error) {
