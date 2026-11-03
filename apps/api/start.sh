@@ -21,6 +21,31 @@ set -e
 # script's own directory instead of trusting the caller's cwd.
 cd "$(dirname "$0")"
 
+# Validate configuration BEFORE migrating.
+#
+# The application already refuses to start on unsafe production config, but
+# that check lives in the FastAPI lifespan, which runs AFTER alembic. So a
+# missing DATABASE_URL did not produce the message written for it. Settings
+# fell back to the sqlite+aiosqlite default, alembic built a SQLite engine,
+# and the deploy died on:
+#
+#   ModuleNotFoundError: No module named 'aiosqlite'
+#
+# - because aiosqlite is a dev-only extra, absent from the production image.
+# Running the real validator first restores the intended message, and reports
+# every problem at once rather than one per deploy.
+python - <<'VALIDATE'
+import sys
+
+from app.config import ConfigurationError, validate_runtime_config
+
+try:
+    validate_runtime_config()
+except ConfigurationError as exc:
+    print(f"FATAL: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+VALIDATE
+
 # `python -m alembic` rather than the `alembic` console script: it does not
 # depend on the entry-point shim being on PATH for the runtime user.
 python -m alembic upgrade head

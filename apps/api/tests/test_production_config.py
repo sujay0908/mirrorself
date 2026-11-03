@@ -444,3 +444,61 @@ def test_local_dev_origins_remain_the_default(
         "http://localhost:8081",
         "http://localhost:19006",
     ]
+
+
+# --------------------------------------------------------------------------
+# UNSET DATABASE_URL
+#
+# The first Render deploy that got past start-up parsing died on
+# `ModuleNotFoundError: No module named 'aiosqlite'`. DATABASE_URL was simply
+# not set, settings fell back to the sqlite+aiosqlite default, and alembic
+# built a SQLite engine whose dev-only driver is absent from the production
+# image. The validator below is what should have reported that, so these pin
+# the message it produces when the variable is missing entirely rather than
+# explicitly set to a SQLite URL.
+# --------------------------------------------------------------------------
+
+
+def test_prod_rejects_a_completely_unset_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_env(
+        monkeypatch,
+        APP_ENV="prod",
+        LLM_PROVIDER="anthropic",
+        ANTHROPIC_API_KEY="placeholder-not-a-real-key",
+        EMBEDDING_PROVIDER="mock",
+    )
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    reset_settings_cache()
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        validate_runtime_config()
+
+    message = str(excinfo.value)
+    assert "DATABASE_URL" in message
+    # The operator needs to be told which variable, not shown a driver import
+    # error from deep inside SQLAlchemy.
+    assert "aiosqlite" not in message
+
+
+def test_every_production_problem_is_reported_in_one_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One deploy should surface every blocker, not one per attempt."""
+    _set_env(
+        monkeypatch,
+        APP_ENV="prod",
+        LLM_PROVIDER="anthropic",
+        EMBEDDING_PROVIDER="mock",
+    )
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    reset_settings_cache()
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        validate_runtime_config()
+
+    message = str(excinfo.value)
+    assert "DATABASE_URL" in message
+    assert "ANTHROPIC_API_KEY" in message
