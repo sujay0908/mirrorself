@@ -23,10 +23,16 @@ services:
     dockerfilePath: ./infra/docker/Dockerfile.api
     dockerContext: .
     healthCheckPath: /v1/health
-    # Migrations run before the server binds. `alembic upgrade head` is
-    # idempotent, so a restart or a free-tier cold start is a no-op once the
-    # schema is current. Keep `exec` so uvicorn stays PID 1 for signals.
-    dockerCommand: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    # Start-up applies migrations and then serves; see apps/api/start.sh.
+    #
+    # It is a script rather than an inline command because Render does not
+    # interpolate variables in Blueprint files and re-parses this value. The
+    # previous inline form
+    #   sh -c "alembic upgrade head && exec uvicorn ... --port $PORT"
+    # reached a shell as one quoted word and exited 127 with
+    #   sh: 1: alembic upgrade head && exec uvicorn ...: not found
+    # Render's own Blueprint docs use a start script here for the same reason.
+    dockerCommand: sh /srv/apps/api/start.sh
     envVars:
       - key: APP_ENV
         value: prod

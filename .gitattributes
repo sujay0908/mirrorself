@@ -1,0 +1,6 @@
+# Shell scripts must be LF in every checkout, whatever each clone's
+# core.autocrlf happens to be. A CR left in the shebang or in a command line
+# makes sh fail with a misleading "not found" - which is precisely how the
+# first production start-up broke. apps/api/start.sh now gates the container's
+# entrypoint, so this is load-bearing.
+*.sh text eol=lf

@@ -31,6 +31,9 @@ RUN pip install --upgrade pip \
 
 COPY apps/api ./
 
+# A Windows checkout does not carry the exec bit, so set it in the image.
+RUN chmod +x ./start.sh
+
 # Run as an unprivileged user. The app writes nothing to disk (logs go to
 # stdout), so read access to the root-owned, world-readable source is enough.
 RUN useradd --create-home --uid 1001 appuser
