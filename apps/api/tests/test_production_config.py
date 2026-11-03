@@ -367,3 +367,80 @@ def test_a_providers_raw_url_now_satisfies_production_validation(
     # The database is no longer a complaint; only the dev-only LLM provider is.
     assert "DATABASE_URL" not in message
     assert "development-only" in message
+
+
+# --------------------------------------------------------------------------
+# CORS ORIGINS
+#
+# A browser origin missing from this list is not a server error: the request
+# is rejected by the browser, the API logs nothing unusual, and the frontend
+# reports only that it cannot reach the API. The deployed frontend origin
+# therefore has to survive parsing exactly as written.
+# --------------------------------------------------------------------------
+
+
+def test_multiple_cors_origins_are_split(monkeypatch: pytest.MonkeyPatch) -> None:
+    deployed = "https://mirrorself-web.vercel.app,https://timeismetime.com"
+    _set_env(
+        monkeypatch,
+        APP_ENV="dev",
+        DATABASE_URL="sqlite+aiosqlite:///:memory:",
+        LLM_PROVIDER="mock",
+        EMBEDDING_PROVIDER="mock",
+        CORS_ALLOW_ORIGINS=deployed,
+    )
+    assert get_settings().cors_origins_list == [
+        "https://mirrorself-web.vercel.app",
+        "https://timeismetime.com",
+    ]
+
+
+def test_cors_origins_tolerate_whitespace_and_empty_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_env(
+        monkeypatch,
+        APP_ENV="dev",
+        DATABASE_URL="sqlite+aiosqlite:///:memory:",
+        LLM_PROVIDER="mock",
+        EMBEDDING_PROVIDER="mock",
+        CORS_ALLOW_ORIGINS=" https://a.example ,, https://b.example , ",
+    )
+    assert get_settings().cors_origins_list == [
+        "https://a.example",
+        "https://b.example",
+    ]
+
+
+def test_cors_origin_is_not_rewritten(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An origin is scheme + host + port and nothing else. A trailing slash or
+    # a path would never match a browser's Origin header.
+    _set_env(
+        monkeypatch,
+        APP_ENV="dev",
+        DATABASE_URL="sqlite+aiosqlite:///:memory:",
+        LLM_PROVIDER="mock",
+        EMBEDDING_PROVIDER="mock",
+        CORS_ALLOW_ORIGINS="https://mirrorself-web.vercel.app",
+    )
+    origins = get_settings().cors_origins_list
+    assert origins == ["https://mirrorself-web.vercel.app"]
+    assert not origins[0].endswith("/")
+
+
+def test_local_dev_origins_remain_the_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_env(
+        monkeypatch,
+        APP_ENV="dev",
+        DATABASE_URL="sqlite+aiosqlite:///:memory:",
+        LLM_PROVIDER="mock",
+        EMBEDDING_PROVIDER="mock",
+    )
+    monkeypatch.delenv("CORS_ALLOW_ORIGINS", raising=False)
+    reset_settings_cache()
+    assert get_settings().cors_origins_list == [
+        "http://localhost:8081",
+        "http://localhost:19006",
+    ]

@@ -55,5 +55,9 @@ services:
         value: mock
       - key: OPENAI_API_KEY
         sync: false
+      # Every browser origin the API is called from. The deployed frontend is
+      # served from the Vercel production alias today and will also answer on
+      # the custom domain once it is moved; a missing origin here is a CORS
+      # rejection on every request, not a visible server error.
       - key: CORS_ALLOW_ORIGINS
-        value: https://timeismetime.com
+        value: https://mirrorself-web.vercel.app,https://timeismetime.com
