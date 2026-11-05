@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import BackgroundTasks, Depends, Header
+from fastapi import BackgroundTasks, Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth.models import AuthenticatedUser
@@ -22,7 +22,11 @@ from app.conversation.service import ConversationService
 from app.db.session import get_db_session, get_sessionmaker
 from app.goal.service import GoalService
 from app.llm.interface import EmbeddingProvider, LLMProvider
-from app.llm.registry import get_embedding_provider, get_llm_provider
+from app.llm.registry import (
+    ProviderNotConfiguredError,
+    get_embedding_provider,
+    get_llm_provider,
+)
 from app.memory.context import ContextBuilder
 from app.memory.retrieval import MemoryRetriever
 from app.memory.service import MemoryService
@@ -60,6 +64,76 @@ def extraction_llm_provider_dep(
 
 
 ExtractionLLMProviderDep = Annotated[LLMProvider, Depends(extraction_llm_provider_dep)]
+
+
+# ---------------------------------------------------------------------
+# Optional LLM dependencies for mixed routers (non-AI + AI endpoints
+# sharing one service).
+#
+# The conversations router carries four pure-DB routes (create, list,
+# retrieve, list-messages) alongside the one route that actually needs
+# the LLM (post_message). Declaring `ConversationServiceDep` with hard
+# `LLMProviderDep`/`ExtractionLLMProviderDep` dependencies meant every
+# one of those routes resolved the LLM provider up front — so a missing
+# `ANTHROPIC_API_KEY` returned 503 for every /v1/conversations* call,
+# including the GETs that never touch the LLM. The optional variants
+# below defer the 503 to the handler that actually needs the provider
+# (see `ConversationService.post_message`), which checks for `None` and
+# raises `ProviderNotConfiguredError` itself.
+#
+# These catch ONLY `ProviderNotConfiguredError` on purpose: any OTHER
+# exception from provider construction (a broken SDK, a settings bug,
+# an unknown provider name) is still a 500 the operator needs to see,
+# not something to be silently downgraded to a degraded request path.
+# ---------------------------------------------------------------------
+
+
+def optional_llm_provider_dep(request: Request) -> LLMProvider | None:
+    """Same provider lookup as the hard LLMProviderDep, but a missing
+    key returns None instead of raising 503.
+
+    Routes through `app.dependency_overrides` by hand so a test that
+    overrides `get_llm_provider` to inject a fake provider still wins
+    here — the override map is FastAPI's own, which Depends() normally
+    consults for us, but the try/except has to live in Python code, so
+    the lookup is explicit.
+    """
+    resolver = request.app.dependency_overrides.get(get_llm_provider, get_llm_provider)
+    try:
+        provider: LLMProvider = resolver()
+    except ProviderNotConfiguredError:
+        return None
+    return provider
+
+
+OptionalLLMProviderDep = Annotated[LLMProvider | None, Depends(optional_llm_provider_dep)]
+
+
+def optional_extraction_llm_provider_dep(
+    request: Request,
+    chat_provider: OptionalLLMProviderDep,
+) -> LLMProvider | None:
+    """Extraction provider mirrors chat by default; nullable here too.
+
+    Honours an override of `extraction_llm_provider_dep` (e.g. a test
+    injecting a deliberately broken extraction provider while chat
+    stays healthy) by routing through the override map the same way
+    the chat lookup does. If no override is set, falls back to the
+    chat provider, matching the real signature.
+    """
+    override = request.app.dependency_overrides.get(extraction_llm_provider_dep)
+    if override is None:
+        return chat_provider
+    try:
+        provider: LLMProvider = override()
+    except ProviderNotConfiguredError:
+        return None
+    return provider
+
+
+OptionalExtractionLLMProviderDep = Annotated[
+    LLMProvider | None, Depends(optional_extraction_llm_provider_dep)
+]
 
 
 def task_runner_dep(background_tasks: BackgroundTasks) -> TaskRunner:
@@ -158,8 +232,8 @@ IntentDetectorDep = Annotated[IntentDetector, Depends(intent_detector_dep)]
 
 def conversation_service_dep(
     session: DBSession,
-    provider: LLMProviderDep,
-    extraction_provider: ExtractionLLMProviderDep,
+    provider: OptionalLLMProviderDep,
+    extraction_provider: OptionalExtractionLLMProviderDep,
     sessionmaker: SessionmakerDep,
     task_runner: TaskRunnerDep,
     settings: SettingsDep,

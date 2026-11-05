@@ -49,6 +49,7 @@ from app.evolution.service import EvolutionService
 from app.goal.models import Goal
 from app.goal.service import GoalService
 from app.llm.interface import LLMProvider
+from app.llm.registry import ProviderNotConfiguredError
 from app.memory.context import ContextBuilder, TwinContext
 from app.memory.retrieval import MemoryRetriever, RetrievalResult
 from app.memory.tasks import extract_memory_candidates_task
@@ -74,7 +75,7 @@ class ConversationService:
     def __init__(
         self,
         session: AsyncSession,
-        provider: LLMProvider,
+        provider: LLMProvider | None,
         *,
         sessionmaker: async_sessionmaker[AsyncSession] | None = None,
         llm_model: str | None = None,
@@ -163,7 +164,22 @@ class ConversationService:
         Retrieval and extraction are both best-effort. A failing retriever
         yields an empty-memory context (chat still works). A failing
         extractor is handled in the background task.
+
+        Hard precondition: an LLM provider must be configured. The dep
+        wires `None` through when no provider is usable (so GET
+        /conversations keeps working without a key); here we refuse the
+        request BEFORE any DB write so a key-less POST cannot leave an
+        orphan user message that the twin never replies to. The 503
+        envelope matches what `app.llm.registry.ProviderNotConfiguredError`
+        would have produced from the dep, so clients see one shape either
+        way.
         """
+        if self._provider is None:
+            raise ProviderNotConfiguredError(
+                "No usable LLM provider is configured; set ANTHROPIC_API_KEY "
+                "(or configure another provider) before posting chat messages."
+            )
+
         conv = await self.get(twin, conversation_id)
 
         user_msg = Message(
