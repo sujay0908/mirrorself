@@ -6,12 +6,15 @@ belongs in configuration. See `.env.example` at the repo root.
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import Literal
 from urllib.parse import parse_qsl, urlencode
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_logger = logging.getLogger(__name__)
 
 # SQLAlchemy needs an explicit async driver; the app only ever speaks asyncpg.
 _ASYNC_PG_SCHEME = "postgresql+asyncpg"
@@ -20,9 +23,7 @@ _ASYNC_PG_SCHEME = "postgresql+asyncpg"
 # unknown query parameters to ``asyncpg.connect()`` as keyword arguments, so
 # leaving these in raises TypeError at the first connection instead of
 # connecting.
-_LIBPQ_ONLY_PARAMS = frozenset(
-    {"sslmode", "channel_binding", "gssencmode", "target_session_attrs"}
-)
+_LIBPQ_ONLY_PARAMS = frozenset({"sslmode", "channel_binding", "gssencmode", "target_session_attrs"})
 
 
 class Settings(BaseSettings):
@@ -149,6 +150,12 @@ class ConfigurationError(RuntimeError):
 # bot, so the validator rejects them rather than booting "healthy".
 _DEV_ONLY_LLM_PROVIDERS: frozenset[str] = frozenset({"mock", "local"})
 
+# Every provider name the LLM registry has a factory for. Kept in sync with
+# ``app.llm.registry._LLM_FACTORIES``. A value outside this set means the
+# operator typo'd ``LLM_PROVIDER`` — a hard startup failure, since nothing
+# else in the app can recover from an unknown provider name.
+_KNOWN_LLM_PROVIDERS: frozenset[str] = frozenset({"mock", "local", "anthropic", "openai"})
+
 _PRODUCTION_ENVS: frozenset[str] = frozenset({"staging", "prod"})
 
 
@@ -172,20 +179,31 @@ def validate_runtime_config() -> None:
     settings = get_settings()
     if settings.app_env not in _PRODUCTION_ENVS:
         # dev/test stay permissive about SQLite and the mock/local providers.
-        # But if a REAL provider is selected here, it still has to be usable:
-        # otherwise the API boots "healthy" and every chat 500s on a missing
-        # SDK or API key, which is indistinguishable from a broken Twin.
-        if settings.llm_provider not in _DEV_ONLY_LLM_PROVIDERS:
+        # An UNKNOWN provider name is still a hard failure here (typo in
+        # .env.dev would otherwise silently boot), but a known real provider
+        # with missing SDK/credentials is a WARNING, not a raise — parity
+        # with the prod behaviour below, and AI endpoints return 503 until
+        # credentials are supplied.
+        provider_name = settings.llm_provider
+        if (
+            provider_name not in _DEV_ONLY_LLM_PROVIDERS
+            and provider_name not in _KNOWN_LLM_PROVIDERS
+        ):
+            raise ConfigurationError(
+                f"Refusing to start: LLM_PROVIDER={provider_name!r} is not a "
+                "known provider (expected one of: anthropic, openai, mock, local)."
+            )
+        if provider_name not in _DEV_ONLY_LLM_PROVIDERS and provider_name in _KNOWN_LLM_PROVIDERS:
             from app.llm.registry import get_llm_provider as _get_llm_provider
 
             try:
                 _get_llm_provider()
             except Exception as exc:
-                # Registry/provider errors are curated and never echo a secret.
-                raise ConfigurationError(
-                    f"Refusing to start: LLM_PROVIDER={settings.llm_provider!r} "
-                    f"is not usable in {settings.app_env}: {exc}"
-                ) from exc
+                _logger.warning(
+                    "api.config.llm_degraded provider=%s detail=%s",
+                    provider_name,
+                    exc,
+                )
         return
 
     # Lazy import to avoid a config <-> registry import cycle.
@@ -208,18 +226,41 @@ def validate_runtime_config() -> None:
             "requires postgresql+asyncpg://…"
         )
 
-    # ---- LLM provider: must be a real provider with SDK + credentials ----
-    if settings.llm_provider in _DEV_ONLY_LLM_PROVIDERS:
+    # ---- LLM provider: name must be known; credentials are a soft check ----
+    #
+    # Historically a missing LLM API key was a hard startup failure, on the
+    # reasoning that booting "healthy" and 500-ing every chat is worse than
+    # not booting at all. That was correct when chat was the only surface,
+    # but the app now also serves health, docs, auth, Twin CRUD and
+    # conversation history — none of which need the LLM. Refusing to boot
+    # also traps already-applied migrations behind an un-rollback-able
+    # deploy. So: the provider NAME is still validated strictly here (a
+    # typo'd or dev-only value stays a hard failure), while a missing SDK
+    # or API key for an otherwise-real provider is logged as a WARNING and
+    # the app comes up in a degraded state. AI-dependent endpoints then
+    # return a controlled 503 from the registry until the key is set, and
+    # operators can save the key and let Render redeploy without rolling
+    # back the DB.
+    provider_name = settings.llm_provider
+    if provider_name in _DEV_ONLY_LLM_PROVIDERS:
         problems.append(
-            f"LLM_PROVIDER={settings.llm_provider!r} is development-only; "
-            "staging/prod requires a real provider (e.g. 'anthropic') with its "
-            "SDK installed and API key set."
+            f"LLM_PROVIDER={provider_name!r} is development-only; "
+            "staging/prod requires a real provider (e.g. 'anthropic')."
+        )
+    elif provider_name not in _KNOWN_LLM_PROVIDERS:
+        problems.append(
+            f"LLM_PROVIDER={provider_name!r} is not a known provider "
+            "(expected one of: anthropic, openai)."
         )
     else:
         try:
             get_llm_provider()
         except Exception as exc:  # registry/provider raise curated, secret-free messages
-            problems.append(f"LLM provider {settings.llm_provider!r} is not usable: {exc}")
+            _logger.warning(
+                "api.config.llm_degraded provider=%s detail=%s",
+                provider_name,
+                exc,
+            )
 
     # ---- Embedding provider: the configured one must be constructible ----
     # Mock embeddings are permitted (best-effort retrieval) but warned about,
@@ -227,9 +268,7 @@ def validate_runtime_config() -> None:
     try:
         get_embedding_provider()
     except Exception as exc:
-        problems.append(
-            f"Embedding provider {settings.embedding_provider!r} is not usable: {exc}"
-        )
+        problems.append(f"Embedding provider {settings.embedding_provider!r} is not usable: {exc}")
 
     if problems:
         raise ConfigurationError(

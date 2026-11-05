@@ -16,8 +16,21 @@ from app.llm.interface import EmbeddingProvider, LLMProvider
 
 
 class ProviderNotConfiguredError(APIError):
+    """Raised when the configured LLM/embedding provider cannot be
+    constructed — typically because its SDK is missing or its API key is
+    not set.
+
+    The app can boot without a usable LLM (see
+    ``app.config.validate_runtime_config``) because every non-AI surface
+    still works. AI-dependent endpoints then receive this error from the
+    FastAPI dependency and surface a 503 Service Unavailable — not a 500,
+    because the server itself is healthy, the AI dependency just is not
+    configured yet. The envelope code remains stable so clients can
+    distinguish this from a transient outage.
+    """
+
     code = "llm_provider_not_configured"
-    status_code = 500
+    status_code = 503
 
 
 # -------- LLM providers --------

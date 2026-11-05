@@ -52,7 +52,11 @@ services:
         value: anthropic
       - key: LLM_MODEL
         value: claude-sonnet-4-5-20250929
-      # Startup aborts without this: a dev-only provider is rejected in prod.
+      # Optional: if unset, the API still boots and non-AI surfaces
+      # (health, docs, auth, Twin CRUD, conversation history) keep working,
+      # but AI-dependent endpoints return 503 until it is supplied. Setting
+      # a dev-only provider name in prod is still a hard startup failure —
+      # see app.config.validate_runtime_config.
       - key: ANTHROPIC_API_KEY
         sync: false
       # `mock` degrades semantic memory retrieval and is warned about at

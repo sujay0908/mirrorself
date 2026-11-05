@@ -95,9 +95,21 @@ def test_prod_accepts_valid_postgres_url(monkeypatch: pytest.MonkeyPatch) -> Non
     validate_runtime_config()
 
 
-def test_prod_rejects_missing_llm_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    # anthropic selected but no ANTHROPIC_API_KEY → registry raises before it
-    # ever needs the SDK, so this is deterministic without the SDK installed.
+def test_prod_boots_without_llm_credentials_but_warns(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A missing LLM API key is a degraded-mode WARNING, not a hard failure.
+
+    Rationale: the app serves health, docs, auth, Twin CRUD and conversation
+    history without the LLM. Refusing to boot traps the DB migrations the
+    deploy already applied behind a deploy that cannot be rolled back
+    cleanly. AI-dependent endpoints handle the missing credential
+    themselves by returning a controlled 503 (see
+    ``app.llm.registry.ProviderNotConfiguredError``); they do not need to
+    be gated here. See `test_llm_provider_dep_returns_503_without_key` for
+    the request-path behaviour.
+    """
     _set_env(
         monkeypatch,
         APP_ENV="prod",
@@ -107,11 +119,15 @@ def test_prod_rejects_missing_llm_credentials(monkeypatch: pytest.MonkeyPatch) -
     )
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     reset_settings_cache()
-    with pytest.raises(ConfigurationError) as excinfo:
-        validate_runtime_config()
-    msg = str(excinfo.value)
-    assert "LLM provider 'anthropic' is not usable" in msg
-    assert "ANTHROPIC_API_KEY" in msg
+    caplog.set_level("WARNING", logger="app.config")
+
+    # Must not raise.
+    validate_runtime_config()
+
+    assert any("api.config.llm_degraded" in rec.getMessage() for rec in caplog.records), (
+        "a missing LLM key must be logged as a warning so operators can "
+        "spot the degraded start-up in the Render logs"
+    )
 
 
 def test_prod_rejects_missing_embedding_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,6 +150,11 @@ def test_prod_rejects_missing_embedding_credentials(monkeypatch: pytest.MonkeyPa
 
 
 def test_prod_rejects_unsupported_llm_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A typo in LLM_PROVIDER still fails hard: nothing in the app can
+    # recover from an unknown name (the registry's factory table is
+    # fixed), so this is a different failure from "the key is missing"
+    # and the operator needs to see it at deploy time, not from a 503
+    # on every chat.
     _set_env(
         monkeypatch,
         APP_ENV="prod",
@@ -144,6 +165,7 @@ def test_prod_rejects_unsupported_llm_provider(monkeypatch: pytest.MonkeyPatch) 
     with pytest.raises(ConfigurationError) as excinfo:
         validate_runtime_config()
     assert "banana" in str(excinfo.value)
+    assert "not a known provider" in str(excinfo.value)
 
 
 def test_prod_rejects_dev_only_mock_llm(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -190,9 +212,16 @@ def test_test_env_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
 # every chat 500s. None of these use a real key.
 
 
-def test_dev_rejects_real_llm_provider_without_credentials(
+def test_dev_boots_with_real_llm_provider_without_credentials(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """Parity with prod: a real provider + missing key is degraded, not fatal.
+
+    A developer running the API locally against a real provider will see
+    a WARNING in the logs and 503s from AI endpoints until they set the
+    key, which is far less confusing than an opaque startup refusal.
+    """
     _set_env(
         monkeypatch,
         APP_ENV="dev",
@@ -202,11 +231,11 @@ def test_dev_rejects_real_llm_provider_without_credentials(
     )
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     reset_settings_cache()
-    with pytest.raises(ConfigurationError) as excinfo:
-        validate_runtime_config()
-    msg = str(excinfo.value)
-    assert "LLM_PROVIDER='anthropic'" in msg
-    assert "ANTHROPIC_API_KEY" in msg
+    caplog.set_level("WARNING", logger="app.config")
+
+    validate_runtime_config()  # no raise
+
+    assert any("api.config.llm_degraded" in rec.getMessage() for rec in caplog.records)
 
 
 def test_dev_accepts_real_llm_provider_once_credentials_are_present(
@@ -228,6 +257,9 @@ def test_dev_accepts_real_llm_provider_once_credentials_are_present(
 
 
 def test_dev_rejects_unknown_llm_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A typo in LLM_PROVIDER stays a hard failure in dev too: the registry
+    # has no factory for an unknown name, so the app would otherwise boot
+    # and 503 on every single chat — strictly worse than refusing to start.
     _set_env(
         monkeypatch,
         APP_ENV="dev",
@@ -238,6 +270,7 @@ def test_dev_rejects_unknown_llm_provider(monkeypatch: pytest.MonkeyPatch) -> No
     with pytest.raises(ConfigurationError) as excinfo:
         validate_runtime_config()
     assert "anthropik" in str(excinfo.value)
+    assert "not a known provider" in str(excinfo.value)
 
 
 def test_dev_still_skips_the_database_and_embedding_checks(
@@ -482,18 +515,109 @@ def test_prod_rejects_a_completely_unset_database_url(
     assert "aiosqlite" not in message
 
 
-def test_every_production_problem_is_reported_in_one_message(
+# --------------------------------------------------------------------------
+# AI-REQUEST BEHAVIOUR WHEN THE LLM KEY IS MISSING
+#
+# The app boots without ANTHROPIC_API_KEY now, so the request path has to
+# handle the missing credential itself. The LLM dependency raises
+# `ProviderNotConfiguredError`, which carries a 503 status so the browser
+# sees "service unavailable" instead of a generic 500 — the server is
+# healthy, the AI dependency just is not configured yet.
+# --------------------------------------------------------------------------
+
+
+def test_llm_provider_dep_returns_503_without_anthropic_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """One deploy should surface every blocker, not one per attempt."""
     _set_env(
         monkeypatch,
         APP_ENV="prod",
+        DATABASE_URL=_POSTGRES_URL,
         LLM_PROVIDER="anthropic",
         EMBEDDING_PROVIDER="mock",
     )
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    from app.llm.registry import ProviderNotConfiguredError, get_llm_provider
+
+    with pytest.raises(ProviderNotConfiguredError) as excinfo:
+        get_llm_provider()
+
+    exc = excinfo.value
+    assert exc.status_code == 503
+    assert exc.code == "llm_provider_not_configured"
+    assert "ANTHROPIC_API_KEY" in exc.message
+    # The error message must never echo a key value — asserts this is still
+    # true now that the raise path is reached at request time, not startup.
+    assert "placeholder" not in exc.message
+
+
+# --------------------------------------------------------------------------
+# MIGRATIONS MUST RUN WITHOUT AN LLM KEY
+#
+# `start.sh` runs `validate_runtime_config()` → `python -m alembic upgrade
+# head` → uvicorn. Nothing in the alembic path touches the LLM registry.
+# This test pins the invariant by exercising every import alembic/env.py
+# makes under `APP_ENV=prod` with `ANTHROPIC_API_KEY` unset — if a future
+# model module starts importing `app.llm`, this fails before the deploy
+# does.
+# --------------------------------------------------------------------------
+
+
+def test_migrations_do_not_need_an_llm_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_env(
+        monkeypatch,
+        APP_ENV="prod",
+        DATABASE_URL=_POSTGRES_URL,
+        LLM_PROVIDER="anthropic",
+        EMBEDDING_PROVIDER="mock",
+    )
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    # Every import alembic/env.py makes to collect ORM metadata. Any of
+    # these starting to depend on the LLM registry would break deploys
+    # even though the key is missing — the whole point of the gate.
+    from app.conversation import models as _conv_models  # noqa: F401
+    from app.db.base import Base
+    from app.evolution import models as _evo_models  # noqa: F401
+    from app.goal import models as _goal_models  # noqa: F401
+    from app.memory import models as _mem_models  # noqa: F401
+    from app.reflection import models as _refl_models  # noqa: F401
+    from app.telemetry import models as _telemetry_models  # noqa: F401
+    from app.twin import models as _twin_models  # noqa: F401
+
+    # Metadata must be populated — otherwise alembic would not see tables.
+    assert len(Base.metadata.tables) > 0
+
+    # The URL env.py feeds alembic must be the normalised postgresql+asyncpg
+    # shape, not the raw "postgres://" the provider gives us.
+    assert get_settings().database_url.startswith("postgresql+asyncpg://")
+
+    # And the production validator — which start.sh runs BEFORE alembic —
+    # must not refuse to start just because the LLM key is missing, or
+    # alembic never gets a chance to migrate.
+    validate_runtime_config()
+
+
+def test_every_production_problem_is_reported_in_one_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One deploy should surface every blocker, not one per attempt.
+
+    A missing LLM key is no longer a blocker (it degrades AI endpoints to
+    503), so this pins the other two hard failures stacking: an unknown
+    provider name AND an unset DATABASE_URL both show up in a single
+    ConfigurationError.
+    """
+    _set_env(
+        monkeypatch,
+        APP_ENV="prod",
+        LLM_PROVIDER="banana",
+        EMBEDDING_PROVIDER="mock",
+    )
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     reset_settings_cache()
 
     with pytest.raises(ConfigurationError) as excinfo:
@@ -501,4 +625,4 @@ def test_every_production_problem_is_reported_in_one_message(
 
     message = str(excinfo.value)
     assert "DATABASE_URL" in message
-    assert "ANTHROPIC_API_KEY" in message
+    assert "banana" in message
