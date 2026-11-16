@@ -4,10 +4,16 @@ on:
   push:
     paths:
       - "apps/api/**"
+      - "infra/docker/**"
       - ".github/workflows/api.yml"
   pull_request:
     paths:
       - "apps/api/**"
+      - "infra/docker/**"
+
+# The Render service deploys a commit only after these checks pass
+# (`autoDeployTrigger: checksPass` in render.yaml), so this file is the gate
+# between a push and production.
 
 jobs:
   test:
@@ -41,11 +47,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/constraints.txt
 
+      # The provider extras are installed so the provider tests run against
+      # the real SDK classes instead of skipping, and so mypy checks the
+      # provider code against real types. Versions come from constraints.txt:
+      # the same set the production image installs.
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install .[dev]
+          pip install -c constraints.txt ".[dev,anthropic,openai]"
 
       - name: Lint
         run: ruff check .
@@ -63,3 +75,72 @@ jobs:
           # TCP DSN (the test helpers also accept a unix-socket DSN locally).
           PAT_TEST_PG_DSN: "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
         run: pytest -q
+
+      # Every migration must apply to an empty database, roll back one step,
+      # and apply again. This is the check that a deploy's `alembic upgrade
+      # head` will succeed and that the newest migration has a working
+      # downgrade if it ever has to be backed out.
+      - name: Migrations apply, roll back and re-apply
+        env:
+          APP_ENV: dev
+          LLM_PROVIDER: mock
+          LLM_MODEL: mock-echo
+          DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/migration_check"
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -c 'CREATE DATABASE migration_check'
+          psql -h localhost -U postgres -d migration_check -c 'CREATE EXTENSION IF NOT EXISTS vector'
+          python -m alembic upgrade head
+          python -m alembic downgrade -1
+          python -m alembic upgrade head
+          python -m alembic current
+
+  image:
+    # The production image is what actually runs. Build it and prove the
+    # application imports and the entrypoint parses inside it, so a broken
+    # Dockerfile or a dependency missing from the runtime install is caught
+    # here rather than as a failed deploy.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build production image
+        run: docker build -f infra/docker/Dockerfile.api -t mirrorself-api:ci .
+
+      - name: Application imports inside the image
+        run: |
+          docker run --rm \
+            -e APP_ENV=dev -e LLM_PROVIDER=mock -e LLM_MODEL=mock-echo \
+            mirrorself-api:ci \
+            python -c "import app.main, anthropic, openai, asyncpg; print('imports ok')"
+
+      - name: Entrypoint is valid and refuses unsafe production config
+        run: |
+          docker run --rm mirrorself-api:ci sh -n /srv/apps/api/start.sh
+          # With no DATABASE_URL, production start-up must stop before it
+          # touches a database, and say why.
+          if docker run --rm -e APP_ENV=prod -e LLM_PROVIDER=anthropic \
+               mirrorself-api:ci sh /srv/apps/api/start.sh > out.txt 2>&1; then
+            echo "start.sh should have refused to start"; cat out.txt; exit 1
+          fi
+          grep -q "Refusing to start" out.txt
+          grep -q "DATABASE_URL" out.txt
+
+  audit:
+    # Known-vulnerability scan of the pinned dependency set. Reported, not
+    # blocking: a new advisory against an unrelated package should not stop
+    # an urgent fix from shipping, but it should be visible on every push.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Audit pinned dependencies
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r constraints.txt --disable-pip --no-deps

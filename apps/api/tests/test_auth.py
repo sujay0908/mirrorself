@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import os
+import time
 import uuid
 
 import pytest
@@ -20,6 +21,10 @@ from jose import jwt
 from app.api.deps import db_session_dep
 from app.config import reset_settings_cache
 from app.main import create_app
+
+
+def _in_five_minutes() -> int:
+    return int(time.time()) + 300
 
 
 def _es256_keypair(kid: str) -> tuple[str, dict[str, str]]:
@@ -103,7 +108,12 @@ async def test_hs256_dev_secret_accepts_valid_token(session_factory) -> None:
 
         sub_id = str(uuid.uuid4())
         token = jwt.encode(
-            {"sub": sub_id, "aud": "authenticated", "email": "hs@example.com"},
+            {
+                    "sub": sub_id,
+                    "aud": "authenticated",
+                    "email": "hs@example.com",
+                    "exp": _in_five_minutes(),
+                },
             "test-secret-for-unit-tests-only",
             algorithm="HS256",
         )
@@ -159,6 +169,7 @@ async def test_jwks_es256_token_is_accepted(session_factory, monkeypatch) -> Non
                 "sub": str(uuid.uuid4()),
                 "aud": "authenticated",
                 "email": "es256@example.com",
+                "exp": _in_five_minutes(),
             },
             private_pem,
             algorithm="ES256",
@@ -199,7 +210,7 @@ async def test_jwks_rejects_token_signed_by_another_key(
     try:
         app = create_app()
         token = jwt.encode(
-            {"sub": str(uuid.uuid4()), "aud": "authenticated"},
+            {"sub": str(uuid.uuid4()), "aud": "authenticated", "exp": _in_five_minutes()},
             attacker_pem,
             algorithm="ES256",
             headers={"kid": "other-kid"},
@@ -238,7 +249,7 @@ async def test_hs_secret_is_ignored_once_jwks_is_configured(
     try:
         app = create_app()
         token = jwt.encode(
-            {"sub": str(uuid.uuid4()), "aud": "authenticated"},
+            {"sub": str(uuid.uuid4()), "aud": "authenticated", "exp": _in_five_minutes()},
             "stale-local-dev-secret-for-unit-tests",
             algorithm="HS256",
         )

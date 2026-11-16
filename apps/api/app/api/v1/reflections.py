@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import (
     CurrentUser,
@@ -25,6 +25,7 @@ from app.api.deps import (
     ReflectionServiceDep,
     SettingsDep,
     TwinServiceDep,
+    rate_limit,
 )
 from app.observability.logging import get_logger
 from app.reflection.scheduler import (
@@ -112,6 +113,7 @@ async def reject_reflection(
     "/run",
     response_model=ReflectionRunOut,
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(rate_limit("ai"))],
 )
 async def run_reflection(
     user: CurrentUser,

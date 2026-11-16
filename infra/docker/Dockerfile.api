@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libpq5 curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY apps/api/pyproject.toml ./apps/api/pyproject.toml
+COPY apps/api/pyproject.toml apps/api/constraints.txt ./apps/api/
 WORKDIR /srv/apps/api
 
 # `pip install .` reads pyproject.toml. Install the OPTIONAL provider
@@ -26,8 +26,12 @@ WORKDIR /srv/apps/api
 # config validator (app.config.validate_runtime_config) enforces that
 # the *configured* provider's SDK and credentials are actually present.
 # No API keys are baked in — credentials come from the environment at run time.
+#
+# `-c constraints.txt` pins every package to the version the test suite ran
+# against, so the image is reproducible and a new upstream release cannot
+# reach production by way of a rebuild.
 RUN pip install --upgrade pip \
-    && pip install ".[anthropic,openai]"
+    && pip install -c constraints.txt ".[anthropic,openai]"
 
 COPY apps/api ./
 

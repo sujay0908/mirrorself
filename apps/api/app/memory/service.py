@@ -50,6 +50,18 @@ from app.twin.models import Twin
 
 logger = get_logger(__name__)
 
+# The API returns an embedding's model and size, never the vector. Each row
+# holds the 1536 floats twice (the legacy JSON column and the pgvector one),
+# so loading whole rows for a list of memories moved megabytes per request
+# to produce four small fields.
+_EMBEDDING_METADATA_ONLY = selectinload(Memory.embeddings).load_only(
+    MemoryEmbedding.id,
+    MemoryEmbedding.memory_id,
+    MemoryEmbedding.embedding_model,
+    MemoryEmbedding.embedding_dimensions,
+    MemoryEmbedding.created_at,
+)
+
 
 class MemoryService:
     def __init__(
@@ -83,7 +95,7 @@ class MemoryService:
             .limit(limit)
             .options(
                 selectinload(Memory.sources),
-                selectinload(Memory.embeddings),
+                _EMBEDDING_METADATA_ONLY,
             )
         )
         if type is not None:
@@ -96,7 +108,7 @@ class MemoryService:
             .where(Memory.id == memory_id, Memory.twin_id == twin.id)
             .options(
                 selectinload(Memory.sources),
-                selectinload(Memory.embeddings),
+                _EMBEDDING_METADATA_ONLY,
             )
         )
         memory = (await self._session.execute(stmt)).scalar_one_or_none()

@@ -22,7 +22,7 @@ Design rules:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -39,6 +39,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.common.clock import utcnow
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
 
 # MVP goal status values (also enforced by DB CHECK).
@@ -56,7 +57,7 @@ GOAL_EVENT_TYPES: tuple[str, ...] = ("created", "updated", "status_changed")
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=UTC)
+    return utcnow()
 
 
 class Goal(Base, UUIDPKMixin, TimestampMixin):

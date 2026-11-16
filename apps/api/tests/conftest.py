@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 
 # Set test env BEFORE any app imports so `Settings()` is constructed with them.
 os.environ.setdefault("APP_ENV", "test")
@@ -21,6 +21,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -45,6 +46,36 @@ from app.telemetry import models as _telemetry_models  # noqa: F401
 from app.twin import models as _twin_models  # noqa: F401
 
 
+@pytest.fixture(autouse=True)
+def _isolate_process_state() -> None:
+    """Signing keys and rate-limit buckets live in module globals. Each test
+    starts with both empty so one test's keys or spent budget cannot decide
+    another test's outcome."""
+    from app.auth.supabase import reset_jwks_cache
+    from app.common.ratelimit import get_rate_limiter
+
+    reset_jwks_cache()
+    get_rate_limiter().reset()
+
+
+@pytest.fixture
+def settings_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., None]]:
+    """Set environment variables and rebuild `Settings` from them.
+
+    Settings are read per request, so a test can change them after the
+    `client` fixture has built the app. The cache is dropped again on the
+    way out so nothing set here reaches the next test.
+    """
+
+    def _set(**env: str) -> None:
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        reset_settings_cache()
+
+    yield _set
+    reset_settings_cache()
+
+
 @pytest.fixture
 def user_a() -> AuthenticatedUser:
     return AuthenticatedUser(supabase_id=uuid.uuid4(), email="a@example.com")
@@ -63,6 +94,22 @@ async def engine():
         poolclass=StaticPool,
         future=True,
     )
+
+    # The stock sqlite3 driver does not open a transaction before SAVEPOINT,
+    # so a released savepoint COMMITS whatever was written inside it. On
+    # PostgreSQL a savepoint is part of the surrounding transaction and rolls
+    # back with it. Without this, a test of "a failed request stores nothing"
+    # would be testing the driver's quirk rather than the application. This
+    # is the documented SQLAlchemy recipe: take transaction control away from
+    # the driver and emit BEGIN ourselves.
+    @event.listens_for(engine.sync_engine, "connect")
+    def _driver_does_not_manage_transactions(dbapi_connection, _record) -> None:
+        dbapi_connection.isolation_level = None
+
+    @event.listens_for(engine.sync_engine, "begin")
+    def _begin_explicitly(conn) -> None:
+        conn.exec_driver_sql("BEGIN")
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     try:

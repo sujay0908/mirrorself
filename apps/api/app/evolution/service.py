@@ -59,9 +59,7 @@ async def _next_seq(session: AsyncSession, twin_id: uuid.UUID) -> int:
         result = await session.execute(text(f"SELECT nextval('{_SEQ_NAME}')"))
         return int(result.scalar_one())
     current_max = (
-        await session.execute(
-            select(func.coalesce(func.max(TwinEvolutionEvent.seq), 0))
-        )
+        await session.execute(select(func.coalesce(func.max(TwinEvolutionEvent.seq), 0)))
     ).scalar_one()
     return int(current_max) + 1
 
@@ -131,10 +129,11 @@ class EvolutionService:
                 TwinEvolutionEvent.twin_id == twin.id,
                 TwinEvolutionEvent.user_id == twin.user_id,
             )
-            .order_by(
-                TwinEvolutionEvent.created_at.desc(),
-                TwinEvolutionEvent.id.asc(),
-            )
+            # `seq` is assigned in commit order per twin, so it is the one
+            # ordering that cannot tie. Timestamps can: several events
+            # written by one confirmation share a clock reading, and the old
+            # tie-break (a random id) returned them in arbitrary order.
+            .order_by(TwinEvolutionEvent.seq.desc())
             .limit(limit)
         )
         return (await self._session.execute(stmt)).scalars().all()

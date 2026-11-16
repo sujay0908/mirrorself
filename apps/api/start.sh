@@ -52,4 +52,20 @@ python -m alembic upgrade head
 
 # `exec` so uvicorn replaces the shell and receives SIGTERM directly, which is
 # what lets the platform stop the container cleanly.
-exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+#
+# --timeout-keep-alive 75        Longer than the edge proxy's idle timeout, so
+#                                the proxy never reuses a connection this side
+#                                has already closed (which surfaces as a 502).
+# --timeout-graceful-shutdown 25 On deploy, let in-flight requests (a chat turn
+#                                waiting on the model) finish, inside the 30 s
+#                                the platform allows before it kills the process.
+# --no-access-log                The request middleware already writes one
+#                                structured line per request, with its id.
+# --no-server-header             Do not advertise the server software.
+exec uvicorn app.main:app \
+    --host 0.0.0.0 \
+    --port "${PORT:-8000}" \
+    --timeout-keep-alive 75 \
+    --timeout-graceful-shutdown 25 \
+    --no-access-log \
+    --no-server-header

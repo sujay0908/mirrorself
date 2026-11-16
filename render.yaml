@@ -22,7 +22,13 @@ services:
     region: oregon
     dockerfilePath: ./infra/docker/Dockerfile.api
     dockerContext: .
+    # Liveness only, on purpose. /v1/ready also checks the database, and a
+    # serverless database waking from idle can take several seconds; tying
+    # restarts to that would bounce a healthy process.
     healthCheckPath: /v1/health
+    # Deploy a commit only after its GitHub checks pass, so a push that fails
+    # the test suite never reaches production.
+    autoDeployTrigger: checksPass
     # Start-up applies migrations and then serves; see apps/api/start.sh.
     #
     # It is a script rather than an inline command because Render does not
@@ -50,8 +56,15 @@ services:
         value: authenticated
       - key: LLM_PROVIDER
         value: anthropic
+      # claude-sonnet-4-5 retires on 2026-11-30; this is its successor in the
+      # same tier. Any current model id works here (claude-haiku-5-5 is the
+      # low-cost option, claude-opus-5-5 the most capable).
       - key: LLM_MODEL
-        value: claude-sonnet-4-5-20250929
+        value: claude-sonnet-5-5
+      # Conversation does not need deep reasoning; `low` keeps replies quick
+      # and inexpensive. Remove to use the model's default.
+      - key: LLM_EFFORT
+        value: low
       # Optional: if unset, the API still boots and non-AI surfaces
       # (health, docs, auth, Twin CRUD, conversation history) keep working,
       # but AI-dependent endpoints return 503 until it is supplied. Setting
@@ -65,9 +78,10 @@ services:
         value: mock
       - key: OPENAI_API_KEY
         sync: false
-      # Every browser origin the API is called from. The deployed frontend is
-      # served from the Vercel production alias today and will also answer on
-      # the custom domain once it is moved; a missing origin here is a CORS
-      # rejection on every request, not a visible server error.
+      # Every browser origin the API is called from: the Vercel alias, the
+      # app subdomain, and www/apex (which serve the same app until a separate
+      # public site exists). An origin missing here is a CORS rejection on
+      # every request from it, which the browser reports as "cannot reach the
+      # API" rather than as a visible server error.
       - key: CORS_ALLOW_ORIGINS
-        value: https://mirrorself-web.vercel.app,https://timeismetime.com
+        value: https://mirrorself-web.vercel.app,https://app.timeismetime.com,https://www.timeismetime.com,https://timeismetime.com

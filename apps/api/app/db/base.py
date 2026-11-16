@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import DateTime, Uuid, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from app.common.clock import utcnow
 from app.common.ids import new_id
 
 
@@ -16,7 +17,7 @@ class Base(DeclarativeBase):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=UTC)
+    return utcnow()
 
 
 class UUIDPKMixin:

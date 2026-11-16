@@ -90,7 +90,7 @@ class GoalService:
         stmt = (
             select(Goal)
             .where(Goal.twin_id == twin.id, Goal.user_id == twin.user_id)
-            .order_by(Goal.updated_at.desc(), Goal.id.asc())
+            .order_by(Goal.updated_at.desc(), Goal.created_at.desc(), Goal.id.asc())
         )
         if status is not None:
             stmt = stmt.where(Goal.status == status)

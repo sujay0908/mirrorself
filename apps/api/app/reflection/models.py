@@ -31,7 +31,7 @@ Rules enforced here (and reinforced by tests):
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -48,6 +48,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.common.clock import utcnow
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
 
 REFLECTION_KINDS: tuple[str, ...] = (
@@ -60,7 +61,7 @@ REFLECTION_STATUSES: tuple[str, ...] = ("pending", "confirmed", "rejected")
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=UTC)
+    return utcnow()
 
 
 class ReflectionCandidate(Base, UUIDPKMixin, TimestampMixin):

@@ -41,7 +41,7 @@ LLMProviderFactory = Callable[[Settings], LLMProvider]
 def _make_mock(settings: Settings) -> LLMProvider:
     from app.llm.providers.mock import MockProvider
 
-    return MockProvider()
+    return MockProvider(latency_ms=settings.mock_llm_latency_ms)
 
 
 def _make_anthropic(settings: Settings) -> LLMProvider:
@@ -49,7 +49,14 @@ def _make_anthropic(settings: Settings) -> LLMProvider:
 
     if not settings.anthropic_api_key:
         raise ProviderNotConfiguredError("ANTHROPIC_API_KEY is not set but LLM_PROVIDER=anthropic.")
-    return AnthropicProvider(api_key=settings.anthropic_api_key)
+    return AnthropicProvider(
+        api_key=settings.anthropic_api_key,
+        timeout_seconds=settings.llm_timeout_seconds,
+        max_retries=settings.llm_max_retries,
+        max_tokens=settings.llm_max_tokens,
+        effort=settings.llm_effort,
+        refusal_fallback=settings.llm_refusal_fallback == "auto",
+    )
 
 
 def _make_openai(settings: Settings) -> LLMProvider:
@@ -57,7 +64,11 @@ def _make_openai(settings: Settings) -> LLMProvider:
 
     if not settings.openai_api_key:
         raise ProviderNotConfiguredError("OPENAI_API_KEY is not set but LLM_PROVIDER=openai.")
-    return OpenAIProvider(api_key=settings.openai_api_key)
+    return OpenAIProvider(
+        api_key=settings.openai_api_key,
+        timeout_seconds=settings.llm_timeout_seconds,
+        max_retries=settings.llm_max_retries,
+    )
 
 
 def _make_local(settings: Settings) -> LLMProvider:

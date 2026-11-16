@@ -32,7 +32,7 @@ Ownership:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
@@ -46,6 +46,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.common.clock import utcnow
 from app.db.base import Base, UUIDPKMixin
 
 EVOLUTION_EVENT_TYPES: tuple[str, ...] = (
@@ -58,7 +59,7 @@ EVOLUTION_EVENT_TYPES: tuple[str, ...] = (
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=UTC)
+    return utcnow()
 
 
 class TwinEvolutionEvent(Base, UUIDPKMixin):

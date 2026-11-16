@@ -22,13 +22,16 @@ from __future__ import annotations
 
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import case, select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlalchemy.orm import selectinload
 
-from app.common.errors import NotFoundError
+from app.common.clock import utcnow
+from app.common.errors import ConflictError, NotFoundError
+from app.common.ids import new_id
 from app.common.tasks import TaskRunner
 from app.config import Settings
 from app.conversation.intent import (
@@ -64,6 +67,27 @@ logger = get_logger(__name__)
 
 class ConversationNotFoundError(NotFoundError):
     code = "conversation_not_found"
+
+
+class MessageInProgressError(ConflictError):
+    """The same client request id is being processed by another request."""
+
+    code = "message_in_progress"
+
+
+# Listing bounds. A conversation list or a transcript is a screenful of rows;
+# nothing legitimate needs an unbounded read.
+CONVERSATION_LIST_DEFAULT = 100
+CONVERSATION_LIST_MAX = 200
+MESSAGE_LIST_DEFAULT = 200
+MESSAGE_LIST_MAX = 500
+
+# A conversation with no title shows as a row of identical placeholders, so
+# the first message names it.
+_AUTO_TITLE_CHARS = 60
+
+# User turn before twin turn when two rows share a timestamp.
+_ROLE_ORDER = case((Message.role == "user", 0), else_=1)
 
 
 class ConversationService:
@@ -110,22 +134,28 @@ class ConversationService:
         # learning acknowledgement is a no-op when not wired.
         self._evolution_service = evolution_service
 
-    async def list_for_twin(self, twin: Twin) -> list[Conversation]:
+    async def list_for_twin(
+        self,
+        twin: Twin,
+        *,
+        limit: int = CONVERSATION_LIST_DEFAULT,
+        offset: int = 0,
+    ) -> list[Conversation]:
         stmt = (
             select(Conversation)
             .where(Conversation.twin_id == twin.id)
-            .order_by(Conversation.updated_at.desc())
+            .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
+            .limit(max(1, min(limit, CONVERSATION_LIST_MAX)))
+            .offset(max(0, offset))
         )
         return list((await self._session.execute(stmt)).scalars())
 
     async def get(self, twin: Twin, conversation_id: uuid.UUID) -> Conversation:
-        stmt = (
-            select(Conversation)
-            .where(
-                Conversation.id == conversation_id,
-                Conversation.twin_id == twin.id,
-            )
-            .options(selectinload(Conversation.messages))
+        """The conversation row, owner-scoped. Messages are NOT loaded: every
+        caller that wants them asks for a bounded slice."""
+        stmt = select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.twin_id == twin.id,
         )
         conv = (await self._session.execute(stmt)).scalar_one_or_none()
         if conv is None:
@@ -148,18 +178,137 @@ class ConversationService:
         )
         return conv
 
-    async def list_messages(self, twin: Twin, conversation_id: uuid.UUID) -> list[Message]:
+    async def list_messages(
+        self,
+        twin: Twin,
+        conversation_id: uuid.UUID,
+        *,
+        limit: int = MESSAGE_LIST_DEFAULT,
+        before: uuid.UUID | None = None,
+    ) -> list[Message]:
+        """The most recent `limit` messages, oldest first.
+
+        `before` is a message id from a previous page; the result is the
+        slice immediately older than it.
+        """
         conv = await self.get(twin, conversation_id)
-        return list(conv.messages)
+        return await self._recent_messages(
+            conv.id,
+            limit=max(1, min(limit, MESSAGE_LIST_MAX)),
+            before=before,
+        )
+
+    async def _recent_messages(
+        self,
+        conversation_id: uuid.UUID,
+        *,
+        limit: int,
+        before: uuid.UUID | None = None,
+        exclude: uuid.UUID | None = None,
+    ) -> list[Message]:
+        stmt = select(Message).where(Message.conversation_id == conversation_id)
+        if before is not None:
+            cursor = (
+                select(Message.created_at)
+                .where(Message.id == before, Message.conversation_id == conversation_id)
+                .scalar_subquery()
+            )
+            stmt = stmt.where(Message.created_at < cursor)
+        if exclude is not None:
+            stmt = stmt.where(Message.id != exclude)
+        stmt = stmt.order_by(Message.created_at.desc(), _ROLE_ORDER.desc()).limit(limit)
+        rows = list((await self._session.execute(stmt)).scalars())
+        rows.reverse()
+        return rows
+
+    async def _find_exchange(
+        self, conversation_id: uuid.UUID, client_request_id: str
+    ) -> tuple[Message, Message] | None:
+        """The stored (user, twin) pair for a client request id, if any."""
+        user_msg = (
+            await self._session.execute(
+                select(Message).where(
+                    Message.conversation_id == conversation_id,
+                    Message.client_request_id == client_request_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if user_msg is None:
+            return None
+        reply_id = (user_msg.metadata_json or {}).get("reply_message_id")
+        if reply_id is None:
+            return None
+        twin_msg = (
+            await self._session.execute(
+                select(Message).where(
+                    Message.id == uuid.UUID(str(reply_id)),
+                    Message.conversation_id == conversation_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if twin_msg is None:
+            return None
+        return user_msg, twin_msg
+
+    async def _insert_user_message(
+        self,
+        conv: Conversation,
+        user_msg: Message,
+        client_request_id: str | None,
+    ) -> tuple[Message, Message] | None:
+        """Write the user turn. Returns a stored exchange instead when another
+        request already owns this client request id.
+
+        The insert runs inside a SAVEPOINT so losing the uniqueness race
+        rolls back only the insert and leaves the request's transaction (and
+        everything already loaded in it) usable.
+        """
+        try:
+            async with self._session.begin_nested():
+                if client_request_id is not None and self._is_postgres():
+                    # A concurrent request holding the same key keeps its row
+                    # uncommitted until its model call returns. Waiting that
+                    # long would pin this connection for no benefit.
+                    await self._session.execute(text("SET LOCAL lock_timeout = '3s'"))
+                self._session.add(user_msg)
+                await self._session.flush()
+        except IntegrityError:
+            if client_request_id is None:
+                raise
+            existing = await self._find_exchange(conv.id, client_request_id)
+            if existing is None:
+                raise MessageInProgressError(
+                    "This message is still being processed. Please wait a moment.",
+                    headers={"Retry-After": "3"},
+                ) from None
+            return existing
+        except DBAPIError as exc:
+            if client_request_id is not None and _is_lock_timeout(exc):
+                raise MessageInProgressError(
+                    "This message is still being processed. Please wait a moment.",
+                    headers={"Retry-After": "3"},
+                ) from None
+            raise
+        return None
+
+    def _is_postgres(self) -> bool:
+        bind = self._session.bind
+        return bind is not None and bind.dialect.name == "postgresql"
 
     async def post_message(
         self,
         twin: Twin,
         conversation_id: uuid.UUID,
         content: str,
-    ) -> tuple[Message, Message]:
+        *,
+        client_request_id: str | None = None,
+    ) -> tuple[Message, Message, bool]:
         """Persist the user turn, retrieve relevant memory, run the pipeline,
         persist the twin turn, enqueue extraction.
+
+        Returns `(user_message, twin_message, replayed)`. `replayed` is True
+        when the pair was already stored for this `client_request_id` and no
+        model call was made.
 
         Retrieval and extraction are both best-effort. A failing retriever
         yields an empty-memory context (chat still works). A failing
@@ -173,6 +322,15 @@ class ConversationService:
         envelope matches what `app.llm.registry.ProviderNotConfiguredError`
         would have produced from the dep, so clients see one shape either
         way.
+
+        All-or-nothing: the user turn and the twin turn commit together. If
+        the model call fails nothing is stored, the client still holds the
+        draft, and a retry cannot double a message.
+
+        `client_request_id` makes the call idempotent. A repeat of a request
+        that already completed returns the stored exchange without calling
+        the model again; a repeat that arrives while the first is still
+        running is refused with 409 `message_in_progress`.
         """
         if self._provider is None:
             raise ProviderNotConfiguredError(
@@ -182,16 +340,10 @@ class ConversationService:
 
         conv = await self.get(twin, conversation_id)
 
-        user_msg = Message(
-            conversation_id=conv.id,
-            role="user",
-            content=content,
-        )
-        self._session.add(user_msg)
-        await self._session.flush()
-        await self._session.refresh(user_msg)
-
-        history = [m for m in conv.messages if m.id != user_msg.id]
+        if client_request_id is not None:
+            stored = await self._find_exchange(conv.id, client_request_id)
+            if stored is not None:
+                return stored[0], stored[1], True
 
         # Sprint 6: intent detection and context policy FIRST. The
         # resolved policy drives the retriever's `limit`, the goal
@@ -211,6 +363,34 @@ class ConversationService:
             twin=twin,
         )
         twin_state = TwinState(intent_result=intent_result, policy=policy)
+
+        # Only the window the prompt will actually use is read. Loading the
+        # whole transcript made every turn cost in proportion to the length
+        # of the conversation.
+        history = await self._recent_messages(
+            conv.id,
+            limit=max(policy.context_budget().max_history_turns, 1) + 4,
+        )
+
+        # Timestamps within a conversation are strictly increasing, so the
+        # transcript has one unambiguous order even when two turns land
+        # inside the clock's resolution.
+        user_created_at = _after(history[-1].created_at if history else None)
+        twin_message_id = new_id()
+        user_msg = Message(
+            conversation_id=conv.id,
+            role="user",
+            content=content,
+            created_at=user_created_at,
+            client_request_id=client_request_id,
+            # Lets a replay find the reply without guessing from timestamps.
+            metadata_json=(
+                {"reply_message_id": str(twin_message_id)} if client_request_id is not None else {}
+            ),
+        )
+        stored = await self._insert_user_message(conv, user_msg, client_request_id)
+        if stored is not None:
+            return stored[0], stored[1], True
 
         retrieval = await self._retrieve_safely(
             twin=twin,
@@ -250,9 +430,11 @@ class ConversationService:
         )
 
         twin_msg = Message(
+            id=twin_message_id,
             conversation_id=conv.id,
             role="twin",
             content=response.content,
+            created_at=_after(user_created_at),
             llm_provider=response.provider,
             llm_model=response.model,
             input_tokens=response.input_tokens,
@@ -279,9 +461,18 @@ class ConversationService:
             },
         )
         self._session.add(twin_msg)
+        # The list is ordered by last activity, and an untitled conversation
+        # is named after the message that opened it.
+        conv.updated_at = twin_msg.created_at
+        if not conv.title:
+            conv.title = _auto_title(content)
+        # Commit and stop. Both rows were built here with every column set,
+        # and the session keeps their state across the commit, so there is
+        # nothing to re-read. Re-reading them used to open a new transaction
+        # that stayed open, pinning this request's connection for as long as
+        # the background work below (which makes model calls of its own)
+        # took to finish.
         await self._session.commit()
-        await self._session.refresh(user_msg)
-        await self._session.refresh(twin_msg)
 
         logger.info(
             "conversation.message.persisted",
@@ -326,7 +517,7 @@ class ConversationService:
         # when it runs, exceptions are swallowed so chat is unaffected.
         self._enqueue_reflection_scheduler(twin=twin)
 
-        return user_msg, twin_msg
+        return user_msg, twin_msg, False
 
     async def _detect_intent_safely(
         self,
@@ -661,3 +852,28 @@ class ConversationService:
             twin_id=twin.id,
             settings=self._settings,
         )
+
+
+def _after(previous: datetime | None) -> datetime:
+    """Now, but never at or before `previous`."""
+    now = utcnow()
+    if previous is None:
+        return now
+    if previous.tzinfo is None:
+        # SQLite hands timestamps back without their zone; they are UTC.
+        previous = previous.replace(tzinfo=UTC)
+    return max(now, previous + timedelta(microseconds=1))
+
+
+def _auto_title(content: str) -> str:
+    first_line = content.strip().splitlines()[0].strip() if content.strip() else ""
+    if len(first_line) <= _AUTO_TITLE_CHARS:
+        return first_line
+    return first_line[: _AUTO_TITLE_CHARS - 1].rstrip() + "…"
+
+
+def _is_lock_timeout(exc: DBAPIError) -> bool:
+    """True for Postgres `lock_not_available` (SQLSTATE 55P03)."""
+    orig = exc.orig
+    code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    return code == "55P03"

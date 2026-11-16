@@ -20,7 +20,7 @@ Rules enforced here (and reinforced by tests):
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
@@ -39,6 +39,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.common.clock import utcnow
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
 from app.db.types import VectorColumn
 
@@ -57,7 +58,7 @@ CANDIDATE_STATUSES: tuple[str, ...] = ("pending", "confirmed", "rejected", "expi
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=UTC)
+    return utcnow()
 
 
 class Memory(Base, UUIDPKMixin, TimestampMixin):

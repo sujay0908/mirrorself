@@ -13,8 +13,9 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 
 from app.observability.logging import get_logger
 from app.twin.errors import TwinAlreadyExistsError, TwinNotFoundError
@@ -29,7 +30,11 @@ class TwinService:
         self._session = session
 
     async def get_by_user(self, user_id: uuid.UUID) -> Twin | None:
-        stmt = select(Twin).where(Twin.user_id == user_id).options(selectinload(Twin.profile))
+        # One-to-one, so a join fetches both rows in a single round trip.
+        # Every authenticated endpoint runs this lookup first; with the
+        # database in another region each saved round trip is tens of
+        # milliseconds off every request.
+        stmt = select(Twin).where(Twin.user_id == user_id).options(joinedload(Twin.profile))
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def require_by_user(self, user_id: uuid.UUID) -> Twin:
@@ -52,8 +57,18 @@ class TwinService:
             basic_profile=payload.basic_profile,
         )
         self._session.add(twin)
-        await self._session.flush()
-        await self._session.commit()
+        try:
+            await self._session.flush()
+            await self._session.commit()
+        except IntegrityError:
+            # Two creates for the same user raced past the check above (a
+            # double-tap on the onboarding button). The unique constraint on
+            # user_id let exactly one through; this one reports the same
+            # conflict a sequential second attempt would.
+            await self._session.rollback()
+            raise TwinAlreadyExistsError(
+                "You already have a Twin. One Twin per user in MVP."
+            ) from None
         await self._session.refresh(twin, attribute_names=["profile"])
         logger.info("twin.created", twin_id=str(twin.id), user_id=str(user_id))
         return twin

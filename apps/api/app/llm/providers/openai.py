@@ -1,7 +1,8 @@
-"""OpenAIProvider — stub for parity.
+"""OpenAIProvider — second implementation of the provider contract.
 
-Not exercised in Sprint 1. Wired here so the provider abstraction is
-demonstrated to hold more than one implementation.
+Kept deliberately thin and not used in production. It proves the abstraction
+holds more than one vendor; it has not been exercised against current OpenAI
+models, so treat it as unverified before selecting `LLM_PROVIDER=openai`.
 """
 
 from __future__ import annotations
@@ -9,15 +10,25 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from app.common.errors import APIError
+from app.llm.errors import LLMProviderError
 from app.llm.interface import LLMProvider, LLMRequest, LLMResponse
+from app.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class OpenAIProvider(LLMProvider):
     provider_name: ClassVar[str] = "openai"
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        timeout_seconds: float = 45.0,
+        max_retries: int = 1,
+    ) -> None:
         try:
-            import openai  # type: ignore
+            import openai  # type: ignore[import-not-found,unused-ignore]
         except ImportError as exc:  # pragma: no cover
             raise APIError(
                 "openai SDK not installed. Install with `pip install "
@@ -25,7 +36,9 @@ class OpenAIProvider(LLMProvider):
                 code="dependency_missing",
                 status_code=500,
             ) from exc
-        self._client = openai.AsyncOpenAI(api_key=api_key)
+        self._client = openai.AsyncOpenAI(
+            api_key=api_key, timeout=timeout_seconds, max_retries=max_retries
+        )
 
     async def generate_response(self, request: LLMRequest) -> LLMResponse:
         kwargs: dict[str, Any] = {
@@ -39,11 +52,14 @@ class OpenAIProvider(LLMProvider):
         try:
             resp = await self._client.chat.completions.create(**kwargs)
         except Exception as exc:  # pragma: no cover
-            raise APIError(
-                f"OpenAI API error: {exc}",
-                code="llm_provider_error",
-                status_code=502,
-            ) from exc
+            # The vendor's text is for the operator; it is logged by type only
+            # and never forwarded to the caller.
+            logger.warning(
+                "llm.request_failed",
+                provider=self.provider_name,
+                error_type=type(exc).__name__,
+            )
+            raise LLMProviderError("The AI provider could not process this request.") from exc
         choice = resp.choices[0]
         return LLMResponse(
             content=choice.message.content or "",

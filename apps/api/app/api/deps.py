@@ -6,15 +6,16 @@ against `app.dependency_overrides`.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Annotated
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Annotated, Literal
 
 from fastapi import BackgroundTasks, Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth.models import AuthenticatedUser
 from app.auth.supabase import verify_supabase_jwt
-from app.common.errors import UnauthorizedError
+from app.common.errors import RateLimitedError, UnauthorizedError
+from app.common.ratelimit import get_rate_limiter, retry_after_header
 from app.common.tasks import FastAPIBackgroundRunner, TaskRunner
 from app.config import Settings, get_settings
 from app.conversation.intent import DEFAULT_INTENT_DETECTOR, IntentDetector
@@ -152,10 +153,42 @@ async def get_current_user(
     parts = authorization.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise UnauthorizedError("Authorization header must be 'Bearer <token>'.")
-    return verify_supabase_jwt(parts[1], settings)
+    return await verify_supabase_jwt(parts[1], settings)
 
 
 CurrentUser = Annotated[AuthenticatedUser, Depends(get_current_user)]
+
+
+# ---------------------------------------------------------------------
+# Per-user rate limits.
+#
+# Keyed on the verified token subject, so one account cannot exhaust the
+# service (or the LLM budget) regardless of how many addresses it calls
+# from. The per-IP limit in the request middleware covers callers that
+# never get as far as a valid token.
+# ---------------------------------------------------------------------
+
+RateLimitScope = Literal["default", "chat", "ai"]
+
+
+def rate_limit(scope: RateLimitScope) -> Callable[..., Awaitable[None]]:
+    async def _enforce(user: CurrentUser, settings: SettingsDep) -> None:
+        if not settings.rate_limit_active:
+            return
+        per_minute = {
+            "default": settings.rate_limit_default_per_minute,
+            "chat": settings.rate_limit_chat_per_minute,
+            "ai": settings.rate_limit_ai_per_minute,
+        }[scope]
+        wait = get_rate_limiter().check(f"user:{scope}:{user.user_id}", per_minute=per_minute)
+        if wait > 0:
+            raise RateLimitedError(
+                "You are sending requests too quickly. Please wait a moment and try again.",
+                details={"scope": scope, "retry_after_seconds": int(wait) + 1},
+                headers={"Retry-After": retry_after_header(wait)},
+            )
+
+    return _enforce
 
 
 def twin_service_dep(session: DBSession) -> TwinService:

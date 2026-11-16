@@ -11,7 +11,7 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import parse_qsl, urlencode
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _logger = logging.getLogger(__name__)
@@ -40,19 +40,72 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "test", "staging", "prod"] = "dev"
     log_level: str = "INFO"
 
+    # Commit the running build was made from. Render sets RENDER_GIT_COMMIT on
+    # every git-backed deploy; surfaced by /v1/system/version so a deploy can
+    # be checked against the commit that was tested.
+    git_commit: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GIT_COMMIT", "RENDER_GIT_COMMIT"),
+    )
+    # Interactive API docs. Public by default; set false to hide the schema.
+    api_docs_enabled: bool = True
+
     # ---- Database ----
     database_url: str = "sqlite+aiosqlite:///:memory:"
+    # Pool sizing is per process. pool_size + max_overflow is the hard ceiling
+    # on concurrent database work, and every chat turn holds one connection
+    # for the duration of its LLM call.
+    db_pool_size: int = Field(default=5, ge=1, le=100)
+    db_max_overflow: int = Field(default=10, ge=0, le=200)
+    # How long a request waits for a free connection before failing with 503.
+    db_pool_timeout_seconds: float = Field(default=10.0, gt=0)
+    # Serverless Postgres (Neon) suspends idle computes and drops their
+    # connections; recycle below the suspend window and pre-ping on checkout.
+    db_pool_recycle_seconds: int = Field(default=240, ge=30)
+    db_connect_timeout_seconds: float = Field(default=15.0, gt=0)
+    db_command_timeout_seconds: float = Field(default=30.0, gt=0)
 
     # ---- Supabase Auth ----
     supabase_jwt_jwks_url: str | None = None
     supabase_jwt_audience: str | None = "authenticated"
     supabase_jwt_hs_secret: str | None = None
+    # When set, the token's `iss` claim must equal this value exactly.
+    supabase_jwt_issuer: str | None = None
 
     # ---- LLM ----
     llm_provider: str = "mock"
     llm_model: str = "mock-echo"
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
+    # Per-attempt deadline. The SDK retries timeouts, so the worst case is
+    # roughly llm_timeout_seconds * (llm_max_retries + 1).
+    llm_timeout_seconds: float = Field(default=45.0, gt=0, le=600)
+    llm_max_retries: int = Field(default=1, ge=0, le=5)
+    # Ceiling on generated tokens, thinking included. Callers ask for the
+    # visible answer size they need; the provider never goes below this so a
+    # model that thinks before answering is not cut off mid-reply.
+    llm_max_tokens: int = Field(default=16000, ge=256, le=128000)
+    # Reasoning effort for models that accept it. Unset = the model default.
+    llm_effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
+    # "auto": on models that support it, a safety-classifier decline is
+    # retried server-side on a fallback model. "off": a decline is final.
+    llm_refusal_fallback: Literal["auto", "off"] = "auto"
+    # Mock provider only: delay every reply by this long, so a load test
+    # holds connections the way a real model call does.
+    mock_llm_latency_ms: int = Field(default=0, ge=0, le=60_000)
+
+    # ---- Abuse protection ----
+    # None = on everywhere except the test environment.
+    rate_limit_enabled: bool | None = None
+    # Per authenticated user, per minute.
+    rate_limit_default_per_minute: int = Field(default=120, ge=1)
+    rate_limit_chat_per_minute: int = Field(default=20, ge=1)
+    rate_limit_ai_per_minute: int = Field(default=6, ge=1)
+    # Per client IP, per minute, applied before authentication.
+    rate_limit_ip_per_minute: int = Field(default=300, ge=1)
+    # Largest request body accepted, in bytes. The biggest legitimate payload
+    # is an 8,000-character chat message.
+    max_request_body_bytes: int = Field(default=65_536, ge=1024)
 
     # ---- Embeddings (Sprint 2+; declared here so config is stable) ----
     embedding_provider: str = "mock"
@@ -126,6 +179,12 @@ class Settings(BaseSettings):
     @property
     def is_test(self) -> bool:
         return self.app_env == "test"
+
+    @property
+    def rate_limit_active(self) -> bool:
+        if self.rate_limit_enabled is None:
+            return self.app_env != "test"
+        return self.rate_limit_enabled
 
 
 @lru_cache(maxsize=1)

@@ -14,19 +14,48 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
-def _make_engine(url: str) -> AsyncEngine:
-    kwargs: dict[str, object] = {"echo": False, "future": True}
+def engine_kwargs(url: str, settings: Settings) -> dict[str, object]:
+    """Engine options for `url`. Split out so the pool policy is testable."""
+    kwargs: dict[str, object] = {
+        "echo": False,
+        "future": True,
+        # SQLAlchemy puts bound parameters into error messages and its own
+        # logging. Those parameters are chat messages and memories, which must
+        # never reach a log line.
+        "hide_parameters": True,
+    }
     if url.startswith("sqlite"):
         # SQLite connection args to keep async in one thread; disables
         # thread-check that fights aiosqlite.
         kwargs["connect_args"] = {"check_same_thread": False}
-    return create_async_engine(url, **kwargs)
+        return kwargs
+
+    kwargs.update(
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout_seconds,
+        pool_recycle=settings.db_pool_recycle_seconds,
+        # A serverless database drops idle connections when it suspends. Without
+        # a liveness check the first request after an idle period is handed a
+        # dead connection and fails; with it, the pool reconnects transparently.
+        pool_pre_ping=True,
+        connect_args={
+            "timeout": settings.db_connect_timeout_seconds,
+            "command_timeout": settings.db_command_timeout_seconds,
+            "server_settings": {"application_name": "mirrorself-api"},
+        },
+    )
+    return kwargs
+
+
+def _make_engine(url: str) -> AsyncEngine:
+    return create_async_engine(url, **engine_kwargs(url, get_settings()))
 
 
 def get_engine() -> AsyncEngine:

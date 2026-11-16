@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MessageRole = Literal["user", "twin", "system"]
 
@@ -27,6 +27,16 @@ class ConversationOut(BaseModel):
 
 class MessageIn(BaseModel):
     content: str = Field(min_length=1, max_length=8000)
+
+    @field_validator("content")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        # A whitespace-only message has nothing to answer, and model APIs
+        # reject it outright.
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Message cannot be blank.")
+        return stripped
 
 
 class MessageOut(BaseModel):

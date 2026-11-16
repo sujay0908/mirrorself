@@ -12,7 +12,9 @@ from app import __version__
 from app.api.v1.router import v1_router
 from app.common.errors import register_exception_handlers
 from app.config import get_settings, validate_runtime_config
+from app.db.session import dispose_engine
 from app.observability.logging import configure_logging, get_logger
+from app.observability.middleware import RequestContextMiddleware
 
 logger = get_logger(__name__)
 
@@ -35,31 +37,46 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(
         "api.startup",
         version=__version__,
+        commit=settings.git_commit,
         env=settings.app_env,
         llm_provider=settings.llm_provider,
         llm_model=settings.llm_model,
+        rate_limiting=settings.rate_limit_active,
     )
     yield
+    # Return pooled connections to the database instead of leaving them to
+    # time out server-side on every deploy.
+    await dispose_engine()
     logger.info("api.shutdown")
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    docs = settings.api_docs_enabled
     app = FastAPI(
         title="Personal AI Twin API",
         version=__version__,
-        docs_url="/v1/docs",
-        redoc_url="/v1/redoc",
-        openapi_url="/v1/openapi.json",
+        docs_url="/v1/docs" if docs else None,
+        redoc_url="/v1/redoc" if docs else None,
+        openapi_url="/v1/openapi.json" if docs else None,
         lifespan=lifespan,
     )
 
+    # Order matters: the last middleware added is the outermost. CORS has to
+    # wrap the request-context middleware so the 413 and 429 responses that
+    # middleware writes itself still carry CORS headers; without them a
+    # browser reports "network error" instead of the real status.
+    app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        # Authentication is a bearer token in a header, never a cookie, so
+        # credentialed cross-origin requests are not needed.
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Request-ID"],
+        expose_headers=["X-Request-ID", "Retry-After"],
+        max_age=600,
     )
 
     register_exception_handlers(app)

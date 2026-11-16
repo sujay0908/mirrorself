@@ -18,7 +18,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
 
     def __init__(self, *, api_key: str, model: str, dimensions: int) -> None:
         try:
-            import openai  # type: ignore
+            import openai  # type: ignore[import-not-found,unused-ignore]
         except ImportError as exc:  # pragma: no cover
             raise APIError(
                 "openai SDK not installed. Install with `pip install "
@@ -44,7 +44,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             resp = await self._client.embeddings.create(**kwargs)
         except Exception as exc:  # pragma: no cover
             raise APIError(
-                f"OpenAI embeddings error: {exc}",
+                "The embedding provider could not process this request.",
                 code="embedding_provider_error",
                 status_code=502,
             ) from exc

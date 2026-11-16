@@ -2,13 +2,37 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 CommunicationStylePreset = Literal["neutral", "terse", "warm", "analytical"]
+
+# `basic_profile` is free-form and is rendered into every prompt, so its size
+# is a direct cost and latency lever. These bounds are generous for a handful
+# of facts about a person and far below anything that would hurt.
+BASIC_PROFILE_MAX_KEYS = 50
+BASIC_PROFILE_MAX_BYTES = 8_192
+
+
+def _bounded_profile(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    if value is None:
+        return value
+    if len(value) > BASIC_PROFILE_MAX_KEYS:
+        raise ValueError(f"basic_profile can hold at most {BASIC_PROFILE_MAX_KEYS} entries.")
+    try:
+        size = len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("basic_profile must be JSON-serialisable.") from exc
+    if size > BASIC_PROFILE_MAX_BYTES:
+        raise ValueError(f"basic_profile is larger than {BASIC_PROFILE_MAX_BYTES} bytes.")
+    return value
+
+
+BasicProfile = Annotated[dict[str, Any], AfterValidator(_bounded_profile)]
 
 
 class TwinProfileIn(BaseModel):
@@ -20,7 +44,7 @@ class TwinProfileIn(BaseModel):
 class TwinCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     communication_style: CommunicationStylePreset = "neutral"
-    basic_profile: dict[str, Any] = Field(default_factory=dict)
+    basic_profile: BasicProfile = Field(default_factory=dict)
 
 
 class TwinProfilePatch(BaseModel):
@@ -28,7 +52,7 @@ class TwinProfilePatch(BaseModel):
 
     communication_style_preset: CommunicationStylePreset | None = None
     communication_style_notes: str | None = Field(default=None, max_length=2000)
-    basic_profile: dict[str, Any] | None = None
+    basic_profile: BasicProfile | None = None
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
 
 
