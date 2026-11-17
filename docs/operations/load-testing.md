@@ -64,6 +64,16 @@ round trips.)
   instances have 512 MB).
 - No duplicated messages: every send carried an idempotency key.
 
+### Production measurements (read-only, 2026-11-17)
+
+Production was not load-tested with accounts or writes. Two read-only
+measurements were taken after the deploy:
+
+| Measurement | Result |
+|---|---|
+| `/v1/ready` database check from Render (Oregon) to Neon (Ohio), warm | **~348 ms** (first call 1.2 s while the compute woke). That is ~4–5 cross-country round trips, so every authenticated read in production spends roughly 350–450 ms waiting on the network to the database. |
+| `/v1/health` (no database), 5 / 20 / 50 concurrent for 15 s each | 19 / 76 / **189 req/s**, p50 252 ms at every level (the test client's own distance to Oregon), no errors. The free instance's request handling is not the bottleneck at these levels. |
+
 ## Findings
 
 1. **The connection pool was the first limit.** Raising it from 15 to 50 took
