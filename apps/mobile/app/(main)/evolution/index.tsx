@@ -19,7 +19,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Pressable,
   RefreshControl,
@@ -27,6 +26,9 @@ import {
   Text,
   View,
 } from 'react-native';
+
+import { Alert } from '@/ui/alert';
+import { userErrorMessage } from '@/lib/user-errors';
 import { Stack } from 'expo-router';
 
 import { api } from '@/api/client';
@@ -86,7 +88,7 @@ export default function EvolutionScreen() {
 
   useEffect(() => {
     load()
-      .catch((e) => Alert.alert('Could not load evolution', String(e)))
+      .catch((e) => Alert.alert('Could not load evolution', userErrorMessage(e)))
       .finally(() => setLoading(false));
   }, [load]);
 

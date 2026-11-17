@@ -10,7 +10,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Pressable,
   RefreshControl,
@@ -18,9 +17,12 @@ import {
   Text,
   View,
 } from 'react-native';
+
+import { Alert } from '@/ui/alert';
+import { userErrorMessage } from '@/lib/user-errors';
 import { Stack, useRouter } from 'expo-router';
 
-import { api, APIError } from '@/api/client';
+import { api } from '@/api/client';
 import type { MemoryCandidate } from '@/api/types';
 
 export default function CandidatesScreen() {
@@ -37,7 +39,7 @@ export default function CandidatesScreen() {
 
   useEffect(() => {
     load()
-      .catch((e) => Alert.alert('Could not load candidates', String(e)))
+      .catch((e) => Alert.alert('Could not load candidates', userErrorMessage(e)))
       .finally(() => setLoading(false));
   }, [load]);
 
@@ -58,7 +60,7 @@ export default function CandidatesScreen() {
     } catch (e) {
       Alert.alert(
         'Could not confirm',
-        e instanceof APIError ? e.message : String(e),
+        userErrorMessage(e),
       );
     } finally {
       setBusyId(null);
@@ -73,7 +75,7 @@ export default function CandidatesScreen() {
     } catch (e) {
       Alert.alert(
         'Could not reject',
-        e instanceof APIError ? e.message : String(e),
+        userErrorMessage(e),
       );
     } finally {
       setBusyId(null);

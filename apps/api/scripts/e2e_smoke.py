@@ -76,7 +76,7 @@ class Report:
 
 
 def mint_token(secret: str, *, sub: str | None = None, expires_in: int = 600) -> str:
-    from jose import jwt
+    import jwt
 
     return jwt.encode(
         {

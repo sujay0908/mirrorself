@@ -5,13 +5,15 @@
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+
+import { Alert } from '@/ui/alert';
+import { userErrorMessage } from '@/lib/user-errors';
 import { useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
@@ -43,7 +45,7 @@ export default function CreateTwinScreen() {
       setTwin(twin);
       router.replace('/(main)/home');
     } catch (err) {
-      Alert.alert('Could not create twin', String(err));
+      Alert.alert('Could not create twin', userErrorMessage(err));
     } finally {
       setLoading(false);
     }

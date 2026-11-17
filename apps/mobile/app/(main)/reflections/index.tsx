@@ -20,7 +20,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Pressable,
   RefreshControl,
@@ -28,9 +27,12 @@ import {
   Text,
   View,
 } from 'react-native';
+
+import { Alert } from '@/ui/alert';
+import { userErrorMessage } from '@/lib/user-errors';
 import { Stack } from 'expo-router';
 
-import { api, APIError } from '@/api/client';
+import { api } from '@/api/client';
 import type {
   GoalUpdatePayload,
   InsightPayload,
@@ -190,7 +192,7 @@ export default function ReflectionsScreen() {
 
   useEffect(() => {
     load()
-      .catch((e) => Alert.alert('Could not load reflections', String(e)))
+      .catch((e) => Alert.alert('Could not load reflections', userErrorMessage(e)))
       .finally(() => setLoading(false));
   }, [load]);
 
@@ -222,7 +224,7 @@ export default function ReflectionsScreen() {
     } catch (e) {
       Alert.alert(
         'Reflection run failed',
-        e instanceof APIError ? e.message : String(e),
+        userErrorMessage(e),
       );
     } finally {
       setRunning(false);
@@ -243,7 +245,7 @@ export default function ReflectionsScreen() {
     } catch (e) {
       Alert.alert(
         'Could not confirm',
-        e instanceof APIError ? e.message : String(e),
+        userErrorMessage(e),
       );
     } finally {
       setBusyId(null);
@@ -258,7 +260,7 @@ export default function ReflectionsScreen() {
     } catch (e) {
       Alert.alert(
         'Could not reject',
-        e instanceof APIError ? e.message : String(e),
+        userErrorMessage(e),
       );
     } finally {
       setBusyId(null);

@@ -10,11 +10,11 @@ import time
 import uuid
 from collections.abc import Callable, Iterator
 
+import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from httpx import ASGITransport, AsyncClient
-from jose import jwt
 
 from app.auth import supabase as supabase_auth
 from app.config import reset_settings_cache

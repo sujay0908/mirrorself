@@ -8,7 +8,6 @@
 
 import { useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -18,9 +17,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
+
+import { Alert } from '@/ui/alert';
+import { userErrorMessage } from '@/lib/user-errors';
 import { Stack, useRouter } from 'expo-router';
 
-import { api, APIError } from '@/api/client';
+import { api } from '@/api/client';
 
 const PRIORITIES = [1, 2, 3, 4, 5];
 
@@ -51,7 +53,7 @@ export default function NewGoalScreen() {
     } catch (e) {
       Alert.alert(
         'Could not create goal',
-        e instanceof APIError ? e.message : String(e),
+        userErrorMessage(e),
       );
     } finally {
       setSaving(false);

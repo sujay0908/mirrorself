@@ -8,14 +8,16 @@
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Button,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+
+import { Alert } from '@/ui/alert';
 
 import { magicLinkRedirectTo } from '@/auth/redirect';
 import { supabase } from '@/auth/supabase';
@@ -26,13 +28,14 @@ export default function LoginScreen() {
   const [sent, setSent] = useState(false);
 
   async function onSubmit() {
-    if (!email.includes('@')) {
-      Alert.alert('Please enter a valid email.');
+    const address = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+      Alert.alert('Please enter a valid email address.');
       return;
     }
     setLoading(true);
     const { error } = await supabase.auth.signInWithOtp({
-      email,
+      email: address,
       options: {
         shouldCreateUser: true,
         // Without this Supabase falls back to the project's Site URL, which in
@@ -63,6 +66,9 @@ export default function LoginScreen() {
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType="email-address"
+        autoComplete="email"
+        accessibilityLabel="Email address"
+        onSubmitEditing={onSubmit}
         placeholder="you@example.com"
         value={email}
         onChangeText={setEmail}
@@ -71,9 +77,15 @@ export default function LoginScreen() {
       {loading ? (
         <ActivityIndicator />
       ) : sent ? (
-        <Text style={styles.info}>
-          Check your email — we sent you a sign-in link.
-        </Text>
+        <View style={styles.sent}>
+          <Text style={styles.info}>
+            Check your email — we sent you a sign-in link. Open it on this
+            device and browser.
+          </Text>
+          <Pressable onPress={() => setSent(false)} accessibilityRole="button">
+            <Text style={styles.link}>Use a different email or send again</Text>
+          </Pressable>
+        </View>
       ) : (
         <Button title="Send sign-in link" onPress={onSubmit} />
       )}
@@ -97,4 +109,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   info: { color: '#059669' },
+  sent: { gap: 12 },
+  link: { color: '#4f46e5', fontWeight: '600' },
 });

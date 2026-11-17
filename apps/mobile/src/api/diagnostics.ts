@@ -69,7 +69,7 @@ export function apiFailureMessage(
     case 'unauthorized':
       return `The API rejected this session (HTTP ${failure.status ?? 401}). Its JWT verification settings and the Supabase project that issued the token have to match.`;
     case 'server_error':
-      return `The API returned HTTP ${failure.status ?? 500}. Check the backend logs.`;
+      return `The service had a problem (HTTP ${failure.status ?? 500}). Please try again in a moment.`;
     default:
       return `The API returned ${failure.detail}.`;
   }

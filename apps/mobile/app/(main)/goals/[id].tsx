@@ -9,7 +9,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,9 +16,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
+
+import { Alert } from '@/ui/alert';
+import { userErrorMessage } from '@/lib/user-errors';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
-import { api, APIError } from '@/api/client';
+import { api } from '@/api/client';
 import type { Goal, GoalStatus } from '@/api/types';
 
 const LEGAL_NEXT: Record<GoalStatus, GoalStatus[]> = {
@@ -65,7 +67,7 @@ export default function GoalDetailScreen() {
 
   useEffect(() => {
     load()
-      .catch((e) => Alert.alert('Could not load goal', String(e)))
+      .catch((e) => Alert.alert('Could not load goal', userErrorMessage(e)))
       .finally(() => setLoading(false));
   }, [load]);
 
@@ -91,7 +93,7 @@ export default function GoalDetailScreen() {
     } catch (e) {
       Alert.alert(
         'Could not save',
-        e instanceof APIError ? e.message : String(e),
+        userErrorMessage(e),
       );
     } finally {
       setSaving(false);
@@ -106,7 +108,7 @@ export default function GoalDetailScreen() {
     } catch (e) {
       Alert.alert(
         'Could not update status',
-        e instanceof APIError ? e.message : String(e),
+        userErrorMessage(e),
       );
     }
   }

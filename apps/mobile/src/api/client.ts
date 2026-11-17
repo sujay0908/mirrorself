@@ -44,14 +44,28 @@ async function authHeaders(): Promise<Record<string, string>> {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
+interface RequestOptions {
+  /** Overrides the default deadline for this one call. */
+  timeoutMs?: number;
+  headers?: Record<string, string>;
+}
+
+// A chat turn waits on a model call, and the free backend instance can take
+// most of a minute to wake from idle. The default deadline suits reads; a
+// send gets this much before the client gives up (and a retry with the same
+// idempotency key then picks up the stored reply instead of resending).
+const CHAT_TIMEOUT_MS = 90_000;
+
 async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  options: RequestOptions = {},
 ): Promise<T> {
-  const headers = await authHeaders();
+  const headers = { ...(await authHeaders()), ...(options.headers ?? {}) };
+  const timeoutMs = options.timeoutMs ?? config.apiTimeoutMs;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.apiTimeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let resp: Response;
   try {
     resp = await fetch(`${config.apiUrl}/v1${path}`, {
@@ -67,7 +81,7 @@ async function request<T>(
       throw new APIError(
         408,
         'timeout',
-        `No response from the API within ${config.apiTimeoutMs}ms.`,
+        `No response from the API within ${timeoutMs}ms.`,
       );
     }
     throw err;
@@ -76,14 +90,16 @@ async function request<T>(
   }
   if (!resp.ok) {
     const raw: APIErrorBody = await resp.json().catch(() => ({
-      error: { code: 'network_error', message: `HTTP ${resp.status}` },
+      error: { code: 'http_error', message: `HTTP ${resp.status}` },
     }));
-    throw new APIError(
-      resp.status,
-      raw.error.code,
-      raw.error.message,
-      raw.error.details,
-    );
+    const error = raw?.error ?? { code: 'http_error', message: `HTTP ${resp.status}` };
+    const retryAfter = Number(resp.headers.get('Retry-After'));
+    throw new APIError(resp.status, error.code, error.message, {
+      ...(error.details ?? {}),
+      ...(Number.isFinite(retryAfter) && retryAfter > 0
+        ? { retry_after_seconds: retryAfter }
+        : {}),
+    });
   }
   if (resp.status === 204) return undefined as T;
   return (await resp.json()) as T;
@@ -110,10 +126,26 @@ export const api = {
     request<Conversation>('POST', '/conversations', { title }),
   getConversation: (id: UUID) =>
     request<Conversation>('GET', `/conversations/${id}`),
-  listMessages: (id: UUID) =>
-    request<{ items: Message[] }>('GET', `/conversations/${id}/messages`),
-  postMessage: (id: UUID, content: string) =>
-    request<MessagePair>('POST', `/conversations/${id}/messages`, { content }),
+  listMessages: (id: UUID, limit = 200) =>
+    request<{ items: Message[] }>(
+      'GET',
+      `/conversations/${id}/messages?limit=${limit}`,
+    ),
+  /**
+   * Send one turn. Pass the same `idempotencyKey` when retrying the same
+   * draft: the server then returns the exchange it already stored rather than
+   * creating a second one.
+   */
+  postMessage: (id: UUID, content: string, idempotencyKey: string) =>
+    request<MessagePair>(
+      'POST',
+      `/conversations/${id}/messages`,
+      { content },
+      {
+        timeoutMs: CHAT_TIMEOUT_MS,
+        headers: { 'Idempotency-Key': idempotencyKey },
+      },
+    ),
 
   // Memories (Sprint 4)
   listMemories: (type?: MemoryType) => {

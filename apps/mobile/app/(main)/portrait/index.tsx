@@ -27,7 +27,8 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 
-import { api, APIError } from '@/api/client';
+import { api } from '@/api/client';
+import { userErrorMessage } from '@/lib/user-errors';
 import type {
   EvolutionLead,
   PortraitEvolution,
@@ -75,7 +76,7 @@ export default function PortraitScreen() {
       const p = await api.getTwinPortrait();
       setPortrait(p);
     } catch (e) {
-      setError(e instanceof APIError ? e.message : String(e));
+      setError(userErrorMessage(e));
     }
   }, []);
 

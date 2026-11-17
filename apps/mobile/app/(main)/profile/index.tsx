@@ -22,7 +22,6 @@
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -32,9 +31,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
+
+import { Alert } from '@/ui/alert';
+import { userErrorMessage } from '@/lib/user-errors';
 import { Stack, useRouter } from 'expo-router';
 
-import { api, APIError } from '@/api/client';
+import { api } from '@/api/client';
 import type { CommunicationStylePreset } from '@/api/types';
 import {
   basicProfileToRows,
@@ -105,7 +107,7 @@ export default function ProfileEditScreen() {
       );
       router.back();
     } catch (e) {
-      setError(e instanceof APIError ? e.message : String(e));
+      setError(userErrorMessage(e));
     } finally {
       setSaving(false);
     }

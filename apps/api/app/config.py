@@ -54,9 +54,12 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///:memory:"
     # Pool sizing is per process. pool_size + max_overflow is the hard ceiling
     # on concurrent database work, and every chat turn holds one connection
-    # for the duration of its LLM call.
-    db_pool_size: int = Field(default=5, ge=1, le=100)
-    db_max_overflow: int = Field(default=10, ge=0, le=200)
+    # for the duration of its LLM call. Measured on the staging stack: 15
+    # connections shed 9% of requests at 50 concurrent users and 40% at 100;
+    # 50 connections served 50 users with no errors and 100 with 0.6%. See
+    # docs/operations/load-testing.md.
+    db_pool_size: int = Field(default=20, ge=1, le=100)
+    db_max_overflow: int = Field(default=30, ge=0, le=200)
     # How long a request waits for a free connection before failing with 503.
     db_pool_timeout_seconds: float = Field(default=10.0, gt=0)
     # Serverless Postgres (Neon) suspends idle computes and drops their

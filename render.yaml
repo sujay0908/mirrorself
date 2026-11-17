@@ -29,6 +29,13 @@ services:
     # Deploy a commit only after its GitHub checks pass, so a push that fails
     # the test suite never reaches production.
     autoDeployTrigger: checksPass
+    # Only changes to the API (or how it is built) redeploy it. A docs or
+    # web-app commit otherwise restarted the API for nothing.
+    buildFilter:
+      paths:
+        - apps/api/**
+        - infra/docker/Dockerfile.api
+        - render.yaml
     # Start-up applies migrations and then serves; see apps/api/start.sh.
     #
     # It is a script rather than an inline command because Render does not

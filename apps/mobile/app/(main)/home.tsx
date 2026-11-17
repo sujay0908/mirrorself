@@ -18,7 +18,9 @@ import { useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
 import { apiFailureMessage, logApiFailure, type ApiFailure } from '@/api/diagnostics';
+import { supabase } from '@/auth/supabase';
 import { config } from '@/config';
+import { Alert } from '@/ui/alert';
 import {
   CONVERSATIONS_INITIAL,
   conversationListReducer,
@@ -66,6 +68,20 @@ export default function HomeScreen() {
 
   const retry = useCallback(() => setLoadAttempt((n) => n + 1), []);
 
+  const [signingOut, setSigningOut] = useState(false);
+  const signOut = useCallback(() => {
+    if (signingOut) return;
+    setSigningOut(true);
+    // The auth listener in the root layout clears the session and the gate
+    // sends the person to the sign-in screen.
+    supabase.auth
+      .signOut()
+      .catch(() => {
+        Alert.alert('Could not sign out', 'Please try again.');
+      })
+      .finally(() => setSigningOut(false));
+  }, [signingOut]);
+
   // Not an async onPress handler: a rejected createConversation() there is
   // unhandled for exactly the same reason.
   const newConversation = useCallback(() => {
@@ -88,14 +104,36 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>{twin?.display_name ?? 'Your Twin'}</Text>
-      <Text style={styles.subtitle}>
-        Style: {twin?.profile.communication_style_preset ?? 'neutral'}
-      </Text>
+      <View style={styles.header}>
+        <View style={styles.headerText}>
+          <Text style={styles.title}>{twin?.display_name ?? 'Your Twin'}</Text>
+          <Text style={styles.subtitle}>
+            Style: {twin?.profile.communication_style_preset ?? 'neutral'}
+          </Text>
+        </View>
+        <Pressable
+          onPress={() => router.push('/(main)/profile')}
+          accessibilityRole="button"
+          style={styles.headerAction}
+        >
+          <Text style={styles.headerActionText}>Profile</Text>
+        </Pressable>
+        <Pressable
+          onPress={signOut}
+          disabled={signingOut}
+          accessibilityRole="button"
+          style={styles.headerAction}
+        >
+          <Text style={styles.headerActionText}>
+            {signingOut ? 'Signing out…' : 'Sign out'}
+          </Text>
+        </Pressable>
+      </View>
 
       <View style={styles.tiles}>
         <Pressable
           style={styles.tile}
+          accessibilityRole="button"
           onPress={() => router.push('/(main)/goals')}
         >
           <Text style={styles.tileTitle}>Goals</Text>
@@ -103,6 +141,7 @@ export default function HomeScreen() {
         </Pressable>
         <Pressable
           style={styles.tile}
+          accessibilityRole="button"
           onPress={() => router.push('/(main)/memories')}
         >
           <Text style={styles.tileTitle}>Memories</Text>
@@ -110,6 +149,7 @@ export default function HomeScreen() {
         </Pressable>
         <Pressable
           style={styles.tile}
+          accessibilityRole="button"
           onPress={() => router.push('/(main)/candidates')}
         >
           <Text style={styles.tileTitle}>Review</Text>
@@ -117,6 +157,7 @@ export default function HomeScreen() {
         </Pressable>
         <Pressable
           style={styles.tile}
+          accessibilityRole="button"
           onPress={() => router.push('/(main)/reflections')}
         >
           <Text style={styles.tileTitle}>Reflections</Text>
@@ -124,6 +165,7 @@ export default function HomeScreen() {
         </Pressable>
         <Pressable
           style={styles.tile}
+          accessibilityRole="button"
           onPress={() => router.push('/(main)/evolution')}
         >
           <Text style={styles.tileTitle}>Evolution</Text>
@@ -131,6 +173,7 @@ export default function HomeScreen() {
         </Pressable>
         <Pressable
           style={styles.tile}
+          accessibilityRole="button"
           onPress={() => router.push('/(main)/portrait')}
         >
           <Text style={styles.tileTitle}>Self-portrait</Text>
@@ -195,15 +238,23 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, gap: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerText: { flex: 1 },
+  headerAction: { paddingVertical: 6, paddingHorizontal: 4 },
+  headerActionText: { color: '#4f46e5', fontWeight: '600' },
   title: { fontSize: 24, fontWeight: '700' },
   subtitle: { fontSize: 14, color: '#4b5563', marginBottom: 8 },
+  // Six tiles in one row are unreadable on a phone. They wrap into rows of
+  // two to three, depending on width.
   tiles: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 16,
   },
   tile: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 140,
     backgroundColor: '#eef2ff',
     padding: 12,
     borderRadius: 12,

@@ -12,11 +12,11 @@ import os
 import time
 import uuid
 
+import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from httpx import ASGITransport, AsyncClient
-from jose import jwt
 
 from app.api.deps import db_session_dep
 from app.config import reset_settings_cache
@@ -109,11 +109,11 @@ async def test_hs256_dev_secret_accepts_valid_token(session_factory) -> None:
         sub_id = str(uuid.uuid4())
         token = jwt.encode(
             {
-                    "sub": sub_id,
-                    "aud": "authenticated",
-                    "email": "hs@example.com",
-                    "exp": _in_five_minutes(),
-                },
+                "sub": sub_id,
+                "aud": "authenticated",
+                "email": "hs@example.com",
+                "exp": _in_five_minutes(),
+            },
             "test-secret-for-unit-tests-only",
             algorithm="HS256",
         )
@@ -191,9 +191,7 @@ async def test_jwks_es256_token_is_accepted(session_factory, monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_jwks_rejects_token_signed_by_another_key(
-    session_factory, monkeypatch
-) -> None:
+async def test_jwks_rejects_token_signed_by_another_key(session_factory, monkeypatch) -> None:
     """A token whose kid is not in the JWKS is rejected, not waved through."""
 
     _, published_jwk = _es256_keypair("published-kid")
@@ -227,9 +225,7 @@ async def test_jwks_rejects_token_signed_by_another_key(
 
 
 @pytest.mark.asyncio
-async def test_hs_secret_is_ignored_once_jwks_is_configured(
-    session_factory, monkeypatch
-) -> None:
+async def test_hs_secret_is_ignored_once_jwks_is_configured(session_factory, monkeypatch) -> None:
     """JWKS wins over a stale HS secret - the exact local-dev misconfiguration.
 
     .env.dev still carries a locally generated HS256 secret. With JWKS set,

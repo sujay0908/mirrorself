@@ -10,6 +10,10 @@ Two modes:
 2. **HS mode (local dev only):** verify HS256 tokens with a shared secret
    (`SUPABASE_JWT_HS_SECRET`). Never enabled outside `app_env = "dev"`.
 
+Verification uses PyJWT. python-jose, used before, has an unfixed advisory
+(CVE-2026-85394: public keys accepted as HMAC secrets) and depends on
+python-ecdsa, which has an unfixed timing side channel.
+
 Tests bypass this file entirely by overriding the `get_current_user`
 dependency with a fixture; see `tests/conftest.py`.
 """
@@ -22,7 +26,7 @@ import uuid
 from typing import Any
 
 import httpx
-from jose import JWTError, jwt
+import jwt
 
 from app.auth.models import AuthenticatedUser
 from app.common.errors import ServiceUnavailableError, UnauthorizedError
@@ -39,6 +43,8 @@ _JWKS_TTL_SECONDS = 3600.0
 # Floor between refetches triggered by an unknown key id, so a stream of
 # tokens with made-up ids cannot turn this service into a JWKS request storm.
 _JWKS_MIN_REFETCH_SECONDS = 30.0
+# Tolerated clock difference between the identity provider and this server.
+_LEEWAY_SECONDS = 10
 
 # url -> (fetched_at, jwks document)
 _jwks_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -92,11 +98,15 @@ async def _signing_key(url: str, kid: str | None) -> dict[str, Any] | None:
     return key
 
 
-def _decode_options(settings: Settings) -> dict[str, Any]:
+def _decode_kwargs(settings: Settings) -> dict[str, Any]:
     return {
-        "verify_aud": settings.supabase_jwt_audience is not None,
-        "verify_iss": settings.supabase_jwt_issuer is not None,
-        "require_exp": True,
+        "audience": settings.supabase_jwt_audience,
+        "issuer": settings.supabase_jwt_issuer,
+        "leeway": _LEEWAY_SECONDS,
+        "options": {
+            "require": ["exp", "sub"],
+            "verify_aud": settings.supabase_jwt_audience is not None,
+        },
     }
 
 
@@ -106,9 +116,7 @@ def _decode_hs(token: str, settings: Settings) -> dict[str, Any]:
         token,
         settings.supabase_jwt_hs_secret,
         algorithms=["HS256"],
-        audience=settings.supabase_jwt_audience,
-        issuer=settings.supabase_jwt_issuer,
-        options=_decode_options(settings),
+        **_decode_kwargs(settings),
     )
 
 
@@ -121,13 +129,12 @@ async def _decode_asymmetric(token: str, settings: Settings) -> dict[str, Any]:
     algorithm = key.get("alg", "RS256")
     if algorithm not in _JWKS_ALGORITHMS:
         raise UnauthorizedError("Unsupported token algorithm.", code="unauthorized")
+    signing_key = jwt.PyJWK(key, algorithm=algorithm).key
     return jwt.decode(
         token,
-        key,
+        signing_key,
         algorithms=[algorithm],
-        audience=settings.supabase_jwt_audience,
-        issuer=settings.supabase_jwt_issuer,
-        options=_decode_options(settings),
+        **_decode_kwargs(settings),
     )
 
 
@@ -144,7 +151,7 @@ async def verify_supabase_jwt(token: str, settings: Settings) -> AuthenticatedUs
             raise UnauthorizedError(
                 "Auth not configured: set SUPABASE_JWT_JWKS_URL (or SUPABASE_JWT_HS_SECRET in dev)."
             )
-    except JWTError as exc:
+    except jwt.PyJWTError as exc:
         # The library's reason (expired, bad signature, wrong audience) is
         # logged for operators and deliberately not returned: it tells an
         # attacker which check to work on next.
