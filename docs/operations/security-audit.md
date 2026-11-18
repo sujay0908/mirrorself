@@ -38,24 +38,20 @@ history requires a force-push rewrite, which is out of bounds for this work;
 
 ## High
 
-### S2. Legacy Supabase tables writable with the public key — Open: needs owner
+### S2. Legacy Supabase tables writable with the public key — Fixed (2026-11-18)
 
 `public.users`, `public.conversations`, `public.messages`, `public.facts` in
-the Supabase project have RLS disabled. They are empty and unused (MirrorSelf
-data lives in Neon), but anyone holding the publishable key, which is
-public by design, can read and write them through the Supabase REST API.
-Remediation, either:
+the Supabase project had RLS disabled. They are empty and unused (MirrorSelf
+data lives in Neon), but anyone holding the publishable key, which is public
+by design, could read and write them through the Supabase REST API.
 
-```sql
--- Block all client access, keep the tables:
-ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.facts ENABLE ROW LEVEL SECURITY;
-```
-
-or drop them if nothing depends on them. Not applied automatically: it changes
-the owner's Supabase database.
+With the owner's approval, RLS was enabled on all four with no policies
+(Supabase migration `lock_down_unused_legacy_tables`), which denies all access
+through the API. Verified: an insert with the publishable key into each table
+now fails with `42501 new row violates row-level security policy`, the
+Supabase security advisor no longer reports `rls_disabled_in_public`, and
+sign-in endpoints are unaffected. The tables can be dropped later if nothing
+from the old app needs them.
 
 ### S3. `python-jose` token verification library — Fixed
 

@@ -41,7 +41,7 @@ https://mirrorself-web.vercel.app and https://www.timeismetime.com. It is
 | Custom domains | **PARTIAL** | `www.timeismetime.com` serves the app with a valid certificate. | Apex (parked, HTTPS broken), `app` and `api` need DNS records and two dashboard steps. |
 | SSL | **PASS** except apex | `www`, `*.vercel.app`, `*.onrender.com` valid; HSTS on the API. | Apex fixed by DNS record 1. |
 | CORS | **PASS** | Preflight allowed for the four web origins; unknown origins refused. `www` was rejected before this release. | — |
-| Security tests | **PASS / 1 critical open** | See security-audit.md; `pip-audit` clean. | S1 rotation, S2 Supabase RLS (owner). |
+| Security tests | **PASS / 1 critical open** | See security-audit.md; `pip-audit` clean; S2 (Supabase RLS) fixed 2026-11-18. | S1 credential rotation (owner). |
 | Regression tests | **PASS** | API 423 passed + 6 PostgreSQL tests against Neon; web 106 passed; CI green on the deployed commit (tests, production image build, migration round trip, audit). | — |
 | Browser tests | **PARTIAL** | Chromium engine (Chrome/Edge): desktop and 375 px. | Firefox and Safari not tested. |
 | Performance tests | **PASS** | Staged load test 10→250 users on the staging stack; production read-only measurements. | — |
@@ -82,7 +82,6 @@ https://mirrorself-web.vercel.app and https://www.timeismetime.com. It is
 | Action | Where | Why |
 |---|---|---|
 | Rotate leaked Supabase keys and DB password, Upstash password | Supabase, Upstash dashboards | Critical; security-audit.md S1 |
-| Enable RLS on (or drop) four unused Supabase tables | Supabase SQL editor | security-audit.md S2 |
 | Add `ANTHROPIC_API_KEY` | Render → Environment | Turns on chat, memory extraction, reflections |
 | Add 4 DNS records; add `api.timeismetime.com` in Render; set Supabase URLs | Hostinger, Render, Supabase | domains-dns.md |
 | Daily Neon snapshots | Neon console | 6 h history is the only automatic backup today |
