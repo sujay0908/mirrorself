@@ -9,6 +9,8 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import { colors, space, type } from '@/ui/theme';
+
 const HINT_AFTER_MS = 4000;
 
 export function LoadingScreen() {
@@ -21,7 +23,10 @@ export function LoadingScreen() {
 
   return (
     <View style={styles.container} accessibilityLabel="Loading">
-      <ActivityIndicator size="large" />
+      <View style={styles.mark}>
+        <Text style={styles.markEmoji}>🪞</Text>
+      </View>
+      <ActivityIndicator color={colors.primary} />
       {slow ? (
         <Text style={styles.hint}>
           Waking up the server. After a quiet spell this can take up to a minute.
@@ -36,8 +41,18 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
-    gap: 16,
+    padding: space.xxl,
+    gap: space.lg,
+    backgroundColor: colors.bg,
   },
-  hint: { fontSize: 14, color: '#4b5563', textAlign: 'center', maxWidth: 320 },
+  mark: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markEmoji: { fontSize: 30 },
+  hint: { ...type.small, textAlign: 'center', maxWidth: 300 },
 });

@@ -1,68 +1,43 @@
 /**
- * Twin Self-Portrait screen (Sprint 9).
+ * Self-portrait: what your Twin knows about you, in one place.
  *
- * Four deterministic sections composed server-side from
- * already-authorized data. No LLM. No narrative generation. Opening
- * this screen does NOT create any evolution event, does NOT touch any
- * memory or goal, and does NOT change profile state.
- *
- * UX contract (Sprint 7/8 copy preserved):
- *   • profile_confirmed / memory_learned / memory_consolidated /
- *     goal_updated events are shown as "Your Twin learned…".
- *   • insight_acknowledged events are shown as "You acknowledged…".
- *     Sprint 7 Decision #1 is that an insight is acknowledgement,
- *     NOT identity mutation.
+ * Four sections composed server-side from data you already approved — no AI
+ * involved, nothing changes by opening it. "Your Twin learned…" vs "You
+ * acknowledged…" wording follows the same rule as the Evolution screen.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
+import type { TwinPortrait } from '@/api/types';
+import {
+  friendlyEvent,
+  humanizeKey,
+  importanceLabel,
+  memoryType,
+  priorityLabel,
+  relativeTime,
+  shortDate,
+  styleInfo,
+} from '@/lib/format';
 import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
 import { userErrorMessage } from '@/lib/user-errors';
-import type {
-  EvolutionLead,
-  PortraitEvolution,
-  TwinPortrait,
-} from '@/api/types';
+import {
+  Avatar,
+  Button,
+  Card,
+  Centered,
+  ErrorState,
+  Loading,
+  Page,
+  SectionTitle,
+  Tag,
+} from '@/ui/kit';
+import { colors, radius, space, tones, type } from '@/ui/theme';
 
-const TYPE_LABEL: Record<string, string> = {
-  FACT: 'Facts',
-  PREFERENCE: 'Preferences',
-  EXPERIENCE: 'Experiences',
-  GOAL: 'Goal memories',
-};
-
-function evolutionLead(lead: EvolutionLead): string {
-  return lead === 'acknowledged' ? 'You acknowledged' : 'Your Twin learned';
-}
-
-function evolutionTitle(e: PortraitEvolution): string {
-  switch (e.event_type) {
-    case 'memory_learned':
-      return 'A new memory';
-    case 'memory_consolidated':
-      return 'Two memories merged';
-    case 'goal_updated':
-      return 'A goal note added';
-    case 'profile_confirmed':
-      return 'A profile change';
-    case 'insight_acknowledged':
-      return 'An insight';
-    default:
-      return 'An update';
-  }
-}
+const TYPE_ORDER = ['FACT', 'PREFERENCE', 'EXPERIENCE', 'GOAL'];
 
 export default function PortraitScreen() {
   const router = useRouter();
@@ -72,10 +47,9 @@ export default function PortraitScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setError(null);
     try {
-      const p = await api.getTwinPortrait();
-      setPortrait(p);
+      setPortrait(await api.getTwinPortrait());
+      setError(null);
     } catch (e) {
       setError(userErrorMessage(e));
     }
@@ -97,322 +71,230 @@ export default function PortraitScreen() {
     }
   };
 
-  if (loading) {
+  if (loading) return <Loading />;
+  if (!portrait) {
     return (
-      <View style={styles.center}>
-        <Stack.Screen options={{ title: 'What your Twin knows about you' }} />
-        <ActivityIndicator />
-      </View>
-    );
-  }
-  if (error && !portrait) {
-    return (
-      <View style={styles.center}>
-        <Stack.Screen options={{ title: 'What your Twin knows about you' }} />
-        <Text style={styles.errorTitle}>Could not load portrait</Text>
-        <Text style={styles.errorBody}>{error}</Text>
-        <Pressable
-          onPress={() => {
+      <Centered>
+        <ErrorState
+          title="Could not load your portrait"
+          message={error ?? 'Please try again.'}
+          onRetry={() => {
             setLoading(true);
             load().finally(() => setLoading(false));
           }}
-          style={[styles.btn, styles.btnPrimary]}
-        >
-          <Text style={styles.btnPrimaryText}>Try again</Text>
-        </Pressable>
-      </View>
-    );
-  }
-  if (!portrait) {
-    return (
-      <View style={styles.center}>
-        <Stack.Screen options={{ title: 'What your Twin knows about you' }} />
-        <Text>No Twin yet.</Text>
-      </View>
+        />
+      </Centered>
     );
   }
 
-  const bp = portrait.profile.basic_profile;
-  const bpKeys = Object.keys(bp ?? {});
+  const { profile, memory_summary: mem, active_goals: goals, recent_evolution: recent } = portrait;
+  const style = styleInfo(profile.style_preset);
+  const basics = Object.entries(profile.basic_profile ?? {});
+  const counts = TYPE_ORDER.map((t) => ({ type: t, count: mem.counts_by_type[t] ?? 0 }));
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }
-    >
-      <Stack.Screen options={{ title: 'What your Twin knows about you' }} />
-
-      {/* How I speak to you */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>How I speak to you</Text>
-        <View style={styles.row}>
-          <Text style={styles.label}>Style</Text>
-          <Text style={styles.value}>{portrait.profile.style_preset}</Text>
-        </View>
-        {portrait.profile.style_notes ? (
-          <>
-            <Text style={styles.label}>Notes</Text>
-            <Text style={styles.body}>{portrait.profile.style_notes}</Text>
-          </>
-        ) : null}
-        {bpKeys.length > 0 ? (
-          <>
-            <Text style={styles.label}>Basic profile</Text>
-            {bpKeys.map((k) => (
-              <View key={k} style={styles.kv}>
-                <Text style={styles.kvKey}>{k}</Text>
-                <Text style={styles.kvValue}>{String(bp[k])}</Text>
-              </View>
-            ))}
-          </>
-        ) : null}
-        <Pressable
-          onPress={() => router.push('/(main)/profile')}
-          style={[styles.btn, styles.btnPrimary, styles.editBtn]}
-        >
-          <Text style={styles.btnPrimaryText}>Edit profile</Text>
-        </Pressable>
+    <Page refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      <View style={styles.hero}>
+        <Avatar name={profile.display_name} size={64} />
+        <Text style={type.title}>{profile.display_name}</Text>
+        <Text style={styles.heroLead}>Here&apos;s what I know about you so far.</Text>
       </View>
 
-      {/* What I remember about you */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>What I remember about you</Text>
-        <Text style={styles.summary}>
-          {portrait.memory_summary.total_count}{' '}
-          {portrait.memory_summary.total_count === 1 ? 'memory' : 'memories'} in
-          total.
-        </Text>
-        <View style={styles.typeGrid}>
-          {Object.entries(portrait.memory_summary.counts_by_type).map(
-            ([type, count]) => (
-              <View key={type} style={styles.typeTile}>
-                <Text style={styles.typeTileCount}>{count}</Text>
-                <Text style={styles.typeTileLabel}>
-                  {TYPE_LABEL[type] ?? type}
-                </Text>
-              </View>
-            ),
-          )}
+      <SectionTitle action={{ title: 'Edit', onPress: () => router.push('/(main)/profile') }}>
+        How I talk to you
+      </SectionTitle>
+      <Card>
+        <View style={styles.styleRow}>
+          <Text style={styles.styleEmoji}>{style.emoji}</Text>
+          <View style={styles.flex}>
+            <Text style={type.heading}>{style.label}</Text>
+            <Text style={type.small}>{style.description}</Text>
+          </View>
         </View>
-        {portrait.memory_summary.top_memories.length > 0 ? (
-          <>
-            <Text style={styles.subhead}>Top memories (by importance)</Text>
-            {portrait.memory_summary.top_memories.map((m) => (
-              <Pressable
-                key={m.id}
-                onPress={() =>
-                  router.push({
-                    pathname: '/(main)/memories/[id]',
-                    params: { id: m.id },
-                  })
-                }
-                style={styles.memoryRow}
-              >
-                <View style={styles.memoryRowHeader}>
-                  <Text style={styles.memoryBadge}>{m.type}</Text>
-                  <Text style={styles.memoryImportance}>
-                    importance {m.importance.toFixed(2)}
-                  </Text>
-                </View>
-                <Text style={styles.memorySnippet}>{m.snippet}</Text>
-              </Pressable>
+        {profile.style_notes ? (
+          <View style={styles.quote}>
+            <Text style={styles.quoteText}>“{profile.style_notes}”</Text>
+          </View>
+        ) : null}
+        {basics.length > 0 ? (
+          <View style={styles.basics}>
+            {basics.map(([k, v]) => (
+              <View key={k} style={styles.basicRow}>
+                <Text style={styles.basicKey}>{humanizeKey(k)}</Text>
+                <Text style={styles.basicValue}>{String(v)}</Text>
+              </View>
             ))}
-          </>
+          </View>
         ) : (
-          <Text style={styles.empty}>
-            Nothing yet. As you confirm memory suggestions, they&apos;ll show
-            up here.
+          <Text style={type.small}>
+            Add a few basics — where you live, what you do — so I don&apos;t have to ask.
           </Text>
         )}
-      </View>
+      </Card>
 
-      {/* What you're working on */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>What you&apos;re working on</Text>
-        {portrait.active_goals.length === 0 ? (
-          <Text style={styles.empty}>No active goals.</Text>
+      <SectionTitle action={{ title: 'All memories', onPress: () => router.push('/(main)/memories') }}>
+        What I remember
+      </SectionTitle>
+      <Card>
+        <View style={styles.counts}>
+          {counts.map(({ type: t, count }) => {
+            const info = memoryType(t);
+            return (
+              <View key={t} style={[styles.countTile, { backgroundColor: tones[info.tone].bg }]}>
+                <Text style={styles.countEmoji}>{info.emoji}</Text>
+                <Text style={[styles.countNum, { color: tones[info.tone].fg }]}>{count}</Text>
+                <Text style={type.caption}>{info.plural}</Text>
+              </View>
+            );
+          })}
+        </View>
+        {mem.top_memories.length > 0 ? (
+          <View style={styles.rows}>
+            <Text style={type.overline}>Most important</Text>
+            {mem.top_memories.map((m) => {
+              const info = memoryType(m.type);
+              return (
+                <Pressable
+                  key={m.id}
+                  onPress={() => router.push({ pathname: '/(main)/memories/[id]', params: { id: m.id } })}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.itemRow, pressed && styles.itemRowPressed]}
+                >
+                  <Text style={styles.itemEmoji}>{info.emoji}</Text>
+                  <View style={styles.flex}>
+                    <Text style={styles.itemText} numberOfLines={2}>
+                      {m.snippet}
+                    </Text>
+                    <Text style={type.caption}>{importanceLabel(m.importance)}</Text>
+                  </View>
+                  <Text style={styles.chevron}>›</Text>
+                </Pressable>
+              );
+            })}
+          </View>
         ) : (
-          portrait.active_goals.map((g) => (
+          <Text style={type.small}>
+            Nothing yet. As you keep the memories I suggest, they&apos;ll show up here.
+          </Text>
+        )}
+      </Card>
+
+      <SectionTitle action={{ title: 'All goals', onPress: () => router.push('/(main)/goals') }}>
+        What you&apos;re working on
+      </SectionTitle>
+      <Card>
+        {goals.length === 0 ? (
+          <Text style={type.small}>No active goals. Add one so I can keep it in mind.</Text>
+        ) : (
+          goals.map((g) => (
             <Pressable
               key={g.id}
-              onPress={() =>
-                router.push({
-                  pathname: '/(main)/goals/[id]',
-                  params: { id: g.id },
-                })
-              }
-              style={styles.goalRow}
+              onPress={() => router.push({ pathname: '/(main)/goals/[id]', params: { id: g.id } })}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.itemRow, pressed && styles.itemRowPressed]}
             >
-              <View style={styles.memoryRowHeader}>
-                <Text style={styles.goalPriority}>priority {g.priority}</Text>
-                {g.target_date ? (
-                  <Text style={styles.memoryImportance}>
-                    by {new Date(g.target_date).toLocaleDateString()}
-                  </Text>
-                ) : null}
+              <Text style={styles.itemEmoji}>🎯</Text>
+              <View style={styles.flex}>
+                <Text style={styles.itemText} numberOfLines={2}>
+                  {g.title}
+                </Text>
+                <Text style={type.caption}>
+                  {priorityLabel(g.priority)} priority
+                  {g.target_date ? ` · by ${shortDate(g.target_date)}` : ''}
+                </Text>
               </View>
-              <Text style={styles.goalTitle}>{g.title}</Text>
-              {g.description ? (
-                <Text style={styles.goalDesc}>{g.description}</Text>
-              ) : null}
+              <Text style={styles.chevron}>›</Text>
             </Pressable>
           ))
         )}
-      </View>
+      </Card>
 
-      {/* What I've noticed recently */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>What I&apos;ve noticed recently</Text>
-        {portrait.recent_evolution.length === 0 ? (
-          <Text style={styles.empty}>
-            As you confirm reflections, they&apos;ll show up here.
+      <SectionTitle action={{ title: 'Full history', onPress: () => router.push('/(main)/evolution') }}>
+        Recently
+      </SectionTitle>
+      <Card>
+        {recent.length === 0 ? (
+          <Text style={type.small}>
+            As you keep memories and confirm reflections, changes show up here.
           </Text>
         ) : (
-          portrait.recent_evolution.map((e) => (
-            <View key={e.id} style={styles.evoRow}>
-              <Text style={styles.evoLead}>{evolutionLead(e.lead)}</Text>
-              <Text style={styles.evoTitle}>{evolutionTitle(e)}</Text>
-              <Text style={styles.evoBody}>{e.summary}</Text>
-              <Text style={styles.evoDate}>
-                {new Date(e.created_at).toLocaleString()}
-              </Text>
-            </View>
-          ))
+          recent.map((r) => {
+            const e = friendlyEvent(r.event_type, r.summary);
+            return (
+              <View key={r.id} style={styles.itemRow}>
+                <Text style={styles.itemEmoji}>{e.emoji}</Text>
+                <View style={styles.flex}>
+                  <Text style={styles.itemText}>{e.title}</Text>
+                  <Text style={type.caption}>
+                    {e.leadText} · {relativeTime(r.created_at)}
+                  </Text>
+                </View>
+              </View>
+            );
+          })
         )}
-      </View>
-    </ScrollView>
+      </Card>
+
+      <Button
+        title="Edit profile"
+        variant="secondary"
+        onPress={() => router.push('/(main)/profile')}
+        style={styles.footerButton}
+      />
+      {error ? <Tag label="Showing the last version we loaded" tone="warning" /> : null}
+    </Page>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  content: { padding: 12, gap: 12 },
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    gap: 12,
-    backgroundColor: '#f9fafb',
+  flex: { flex: 1 },
+  hero: { alignItems: 'center', gap: space.xs, paddingVertical: space.md },
+  heroLead: { ...type.body, color: colors.muted },
+  styleRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  styleEmoji: { fontSize: 28 },
+  quote: {
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.sm,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
   },
-  card: {
-    backgroundColor: '#ffffff',
-    padding: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    gap: 8,
-  },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  summary: { fontSize: 14, color: '#374151' },
-  label: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#4b5563',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginTop: 8,
-  },
-  value: { fontSize: 14, color: '#111827', textTransform: 'capitalize' },
-  body: { fontSize: 13, color: '#111827', lineHeight: 18 },
-  row: {
+  quoteText: { ...type.body, color: colors.ink, fontStyle: 'italic' },
+  basics: { gap: 6 },
+  basicRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    gap: space.md,
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  basicKey: { ...type.small },
+  basicValue: { ...type.bodyStrong, flexShrink: 1, textAlign: 'right' },
+  counts: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  countTile: {
+    flexGrow: 1,
+    flexBasis: 70,
+    borderRadius: radius.md,
+    paddingVertical: space.md,
     alignItems: 'center',
-  },
-  kv: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 2 },
-  kvKey: { fontSize: 13, color: '#6b7280' },
-  kvValue: { fontSize: 13, color: '#111827', fontWeight: '600' },
-  subhead: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#4b5563',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginTop: 10,
-  },
-  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
-  typeTile: {
-    backgroundColor: '#eef2ff',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    alignItems: 'center',
-    minWidth: 70,
-  },
-  typeTileCount: { fontSize: 18, fontWeight: '700', color: '#312e81' },
-  typeTileLabel: { fontSize: 11, color: '#4338ca', marginTop: 2 },
-  memoryRow: {
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-    gap: 4,
-  },
-  memoryRowHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  memoryBadge: {
-    backgroundColor: '#eef2ff',
-    color: '#4338ca',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  memoryImportance: { fontSize: 12, color: '#6b7280' },
-  memorySnippet: { fontSize: 13, color: '#111827', lineHeight: 18 },
-  goalRow: {
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-    gap: 4,
-  },
-  goalPriority: {
-    backgroundColor: '#dcfce7',
-    color: '#166534',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  goalTitle: { fontSize: 14, color: '#111827', fontWeight: '600' },
-  goalDesc: { fontSize: 12, color: '#6b7280', lineHeight: 16 },
-  evoRow: {
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
     gap: 2,
   },
-  evoLead: {
-    fontSize: 11,
-    color: '#6b7280',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    fontWeight: '600',
+  countEmoji: { fontSize: 18 },
+  countNum: { fontSize: 22, fontWeight: '800' },
+  rows: { gap: 4, marginTop: space.sm },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.xs,
+    borderRadius: radius.sm,
   },
-  evoTitle: { fontSize: 14, color: '#111827', fontWeight: '700' },
-  evoBody: { fontSize: 13, color: '#374151', lineHeight: 18 },
-  evoDate: { fontSize: 11, color: '#9ca3af' },
-  empty: { color: '#6b7280', fontSize: 13, paddingVertical: 6 },
-  editBtn: { marginTop: 10, alignSelf: 'flex-start' },
-  btn: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-  btnPrimary: { backgroundColor: '#4338ca' },
-  btnPrimaryText: { color: '#ffffff', fontWeight: '700' },
-  errorTitle: { fontSize: 16, fontWeight: '700', color: '#b91c1c' },
-  errorBody: {
-    textAlign: 'center',
-    color: '#6b7280',
-    fontSize: 13,
-    lineHeight: 18,
-  },
+  itemRowPressed: { backgroundColor: colors.surfaceAlt },
+  itemEmoji: { fontSize: 18, width: 26, textAlign: 'center' },
+  itemText: { ...type.body, color: colors.ink },
+  chevron: { fontSize: 22, color: colors.faint },
+  footerButton: { marginTop: space.md, alignSelf: 'center' },
 });

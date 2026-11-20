@@ -1,52 +1,45 @@
 /**
- * Goals list screen (Sprint 4, DF6).
- *
- * Shows active goals first, with a status filter to see paused/achieved/
- * abandoned. "+ New goal" opens the create screen.
+ * Goals list: active goals first, with a filter for the rest.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
-import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
 import type { Goal, GoalStatus } from '@/api/types';
+import { goalStatus, priorityLabel, shortDate } from '@/lib/format';
+import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
+import { userErrorMessage } from '@/lib/user-errors';
+import { Card, EmptyState, ErrorState, FilterBar, listContent, Loading, Tag } from '@/ui/kit';
+import { colors, radius, shadow, space, type } from '@/ui/theme';
 
-const STATUS_OPTIONS: Array<{ label: string; value: GoalStatus | 'ALL' }> = [
+type Filter = GoalStatus | 'ALL';
+
+const STATUS_OPTIONS: ReadonlyArray<{ label: string; value: Filter }> = [
   { label: 'Active', value: 'active' },
   { label: 'Paused', value: 'paused' },
   { label: 'Achieved', value: 'achieved' },
-  { label: 'Abandoned', value: 'abandoned' },
+  { label: 'Dropped', value: 'abandoned' },
   { label: 'All', value: 'ALL' },
 ];
-
-const STATUS_COLORS: Record<GoalStatus, { bg: string; fg: string }> = {
-  active: { bg: '#dcfce7', fg: '#15803d' },
-  paused: { bg: '#fef3c7', fg: '#92400e' },
-  achieved: { bg: '#dbeafe', fg: '#1d4ed8' },
-  abandoned: { bg: '#f3f4f6', fg: '#6b7280' },
-};
 
 export default function GoalsScreen() {
   const router = useRouter();
   const [items, setItems] = useState<Goal[]>([]);
-  const [filter, setFilter] = useState<GoalStatus | 'ALL'>('active');
+  const [filter, setFilter] = useState<Filter>('active');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async (f: GoalStatus | 'ALL') => {
-    const res = await api.listGoals(f === 'ALL' ? undefined : f);
-    setItems(res.items);
+  const load = useCallback(async (f: Filter) => {
+    try {
+      const res = await api.listGoals(f === 'ALL' ? undefined : f);
+      setItems(res.items);
+      setError(null);
+    } catch (e) {
+      setError(userErrorMessage(e));
+    }
   }, []);
 
   useEffect(() => {
@@ -66,161 +59,97 @@ export default function GoalsScreen() {
     }
   };
 
+  const newGoal = () => router.push('/(main)/goals/new');
+
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: 'Goals' }} />
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterBar}
-        contentContainerStyle={styles.filters}
-      >
-        {STATUS_OPTIONS.map((opt) => (
-          <Pressable
-            key={opt.value}
-            onPress={() => setFilter(opt.value)}
-            style={[styles.chip, filter === opt.value && styles.chipActive]}
-          >
-            <Text
-              style={[
-                styles.chipText,
-                filter === opt.value && styles.chipTextActive,
-              ]}
-            >
-              {opt.label}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+      <FilterBar options={STATUS_OPTIONS} value={filter} onChange={setFilter} />
       {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} />
+        <Loading />
+      ) : error && items.length === 0 ? (
+        <ErrorState
+          title="Could not load your goals"
+          message={error}
+          onRetry={() => {
+            setLoading(true);
+            load(filter).finally(() => setLoading(false));
+          }}
+        />
       ) : (
         <FlatList
           data={items}
           keyExtractor={(g) => g.id}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
+          contentContainerStyle={listContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           renderItem={({ item }) => {
-            const colors = STATUS_COLORS[item.status];
+            const s = goalStatus(item.status);
             return (
-              <Pressable
+              <Card
                 onPress={() =>
-                  router.push({
-                    pathname: '/(main)/goals/[id]',
-                    params: { id: item.id },
-                  })
+                  router.push({ pathname: '/(main)/goals/[id]', params: { id: item.id } })
                 }
-                style={styles.row}
               >
                 <View style={styles.rowHeader}>
                   <Text style={styles.title} numberOfLines={2}>
                     {item.title}
                   </Text>
-                  <View
-                    style={[
-                      styles.statusPill,
-                      { backgroundColor: colors.bg },
-                    ]}
-                  >
-                    <Text
-                      style={[styles.statusText, { color: colors.fg }]}
-                    >
-                      {item.status}
-                    </Text>
-                  </View>
+                  <Tag label={s.label} tone={s.tone} />
                 </View>
-                <Text style={styles.meta}>
-                  priority {item.priority}
-                  {item.target_date
-                    ? ` · due ${new Date(item.target_date).toLocaleDateString()}`
-                    : ''}
+                <Text style={type.caption}>
+                  {priorityLabel(item.priority)} priority
+                  {item.target_date ? ` · by ${shortDate(item.target_date)}` : ''}
                 </Text>
                 {item.description ? (
                   <Text style={styles.desc} numberOfLines={2}>
                     {item.description}
                   </Text>
                 ) : null}
-              </Pressable>
+              </Card>
             );
           }}
           ListEmptyComponent={
-            <Text style={styles.empty}>
-              {filter === 'active'
-                ? 'No active goals. Tap "+ New goal" to add one.'
-                : 'No goals in this view.'}
-            </Text>
+            filter === 'active' ? (
+              <EmptyState
+                emoji="🎯"
+                title="No active goals yet"
+                body="Goals tell your Twin what matters to you right now, so it can keep them in mind when you talk."
+                action={{ title: 'Add your first goal', onPress: newGoal }}
+              />
+            ) : (
+              <EmptyState emoji="🗂️" title="Nothing here" body="No goals in this view." />
+            )
           }
         />
       )}
-      <Pressable
-        onPress={() => router.push('/(main)/goals/new')}
-        style={styles.fab}
-      >
-        <Text style={styles.fabText}>+ New goal</Text>
-      </Pressable>
+      {items.length > 0 || filter !== 'active' ? (
+        <Pressable
+          onPress={newGoal}
+          accessibilityRole="button"
+          accessibilityLabel="New goal"
+          style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+        >
+          <Text style={styles.fabText}>＋ New goal</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  // A ScrollView grows to fill its parent by default. With a short or empty
-  // list below it, the strip took half the screen and stretched every chip
-  // into a tall pill.
-  filterBar: { flexGrow: 0, flexShrink: 0 },
-  filters: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    backgroundColor: '#ffffff',
-  },
-  chipActive: { backgroundColor: '#4338ca', borderColor: '#4338ca' },
-  chipText: { color: '#374151', fontSize: 13 },
-  chipTextActive: { color: '#ffffff', fontWeight: '600' },
-  row: {
-    backgroundColor: '#ffffff',
-    marginHorizontal: 12,
-    marginVertical: 4,
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    gap: 6,
-  },
-  rowHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  title: { flex: 1, fontSize: 16, fontWeight: '700', color: '#111827' },
-  statusPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 999,
-    alignSelf: 'flex-start',
-  },
-  statusText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-  meta: { fontSize: 12, color: '#6b7280' },
-  desc: { fontSize: 13, color: '#374151' },
-  empty: { textAlign: 'center', marginTop: 60, color: '#6b7280' },
+  container: { flex: 1, backgroundColor: colors.bg },
+  rowHeader: { flexDirection: 'row', justifyContent: 'space-between', gap: space.sm },
+  title: { flex: 1, ...type.heading },
+  desc: { ...type.small, color: colors.text },
   fab: {
     position: 'absolute',
-    right: 20,
-    bottom: 24,
-    backgroundColor: '#4f46e5',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 999,
+    right: space.xl,
+    bottom: space.xxl,
+    backgroundColor: colors.primary,
+    paddingHorizontal: space.xl,
+    paddingVertical: 14,
+    borderRadius: radius.pill,
+    ...shadow.raised,
   },
-  fabText: { color: '#ffffff', fontWeight: '700' },
+  fabPressed: { backgroundColor: colors.primaryPressed },
+  fabText: { color: colors.onPrimary, fontWeight: '800', fontSize: 15 },
 });

@@ -1,29 +1,22 @@
 /**
- * Memories list screen (Sprint 4, DF6).
- *
- * Newest-first (server default), with a horizontal strip of type filters.
- * Tapping a row opens memory detail. "Review candidates" surfaces the
- * triage flow prominently when there is nothing pending-looking to show.
+ * Memories: everything your Twin has kept, newest first, filterable by kind.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
-import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
 import type { Memory, MemoryType } from '@/api/types';
+import { memoryType, relativeTime } from '@/lib/format';
+import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
+import { userErrorMessage } from '@/lib/user-errors';
+import { Card, EmptyState, ErrorState, FilterBar, listContent, Loading, Tag } from '@/ui/kit';
+import { colors, space, type } from '@/ui/theme';
 
-const TYPE_OPTIONS: Array<{ label: string; value: MemoryType | 'ALL' }> = [
+type Filter = MemoryType | 'ALL';
+
+const TYPE_OPTIONS: ReadonlyArray<{ label: string; value: Filter }> = [
   { label: 'All', value: 'ALL' },
   { label: 'Facts', value: 'FACT' },
   { label: 'Preferences', value: 'PREFERENCE' },
@@ -34,13 +27,19 @@ const TYPE_OPTIONS: Array<{ label: string; value: MemoryType | 'ALL' }> = [
 export default function MemoriesScreen() {
   const router = useRouter();
   const [items, setItems] = useState<Memory[]>([]);
-  const [filter, setFilter] = useState<MemoryType | 'ALL'>('ALL');
+  const [filter, setFilter] = useState<Filter>('ALL');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async (f: MemoryType | 'ALL') => {
-    const res = await api.listMemories(f === 'ALL' ? undefined : f);
-    setItems(res.items);
+  const load = useCallback(async (f: Filter) => {
+    try {
+      const res = await api.listMemories(f === 'ALL' ? undefined : f);
+      setItems(res.items);
+      setError(null);
+    } catch (e) {
+      setError(userErrorMessage(e));
+    }
   }, []);
 
   useEffect(() => {
@@ -64,10 +63,11 @@ export default function MemoriesScreen() {
     <View style={styles.container}>
       <Stack.Screen
         options={{
-          title: 'Memories',
           headerRight: () => (
             <Pressable
               onPress={() => router.push('/(main)/candidates')}
+              accessibilityRole="button"
+              hitSlop={8}
               style={styles.headerBtn}
             >
               <Text style={styles.headerBtnText}>Review</Text>
@@ -75,72 +75,64 @@ export default function MemoriesScreen() {
           ),
         }}
       />
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterBar}
-        contentContainerStyle={styles.filters}
-      >
-        {TYPE_OPTIONS.map((opt) => (
-          <Pressable
-            key={opt.value}
-            onPress={() => setFilter(opt.value)}
-            style={[
-              styles.chip,
-              filter === opt.value && styles.chipActive,
-            ]}
-          >
-            <Text
-              style={[
-                styles.chipText,
-                filter === opt.value && styles.chipTextActive,
-              ]}
-            >
-              {opt.label}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+      <FilterBar options={TYPE_OPTIONS} value={filter} onChange={setFilter} />
       {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} />
+        <Loading />
+      ) : error && items.length === 0 ? (
+        <ErrorState
+          title="Could not load your memories"
+          message={error}
+          onRetry={() => {
+            setLoading(true);
+            load(filter).finally(() => setLoading(false));
+          }}
+        />
       ) : (
         <FlatList
           data={items}
           keyExtractor={(m) => m.id}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          renderItem={({ item }) => (
-            <Pressable
-              onPress={() =>
-                router.push({
-                  pathname: '/(main)/memories/[id]',
-                  params: { id: item.id },
-                })
-              }
-              style={[
-                styles.row,
-                item.superseded_by_memory_id ? styles.rowSuperseded : null,
-              ]}
-            >
-              <View style={styles.rowHeader}>
-                <Text style={styles.badge}>{item.type}</Text>
-                <View style={styles.rowHeaderRight}>
-                  {item.superseded_by_memory_id ? (
-                    <Text style={styles.supersededTag}>Superseded</Text>
-                  ) : null}
-                  <Text style={styles.ts}>
-                    {new Date(item.created_at).toLocaleDateString()}
-                  </Text>
+          contentContainerStyle={listContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          renderItem={({ item }) => {
+            const t = memoryType(item.type);
+            const replaced = Boolean(item.superseded_by_memory_id);
+            return (
+              <Card
+                onPress={() =>
+                  router.push({ pathname: '/(main)/memories/[id]', params: { id: item.id } })
+                }
+                style={replaced ? styles.replaced : null}
+              >
+                <View style={styles.rowHeader}>
+                  <View style={styles.tags}>
+                    <Tag label={`${t.emoji} ${t.label}`} tone={t.tone} />
+                    {replaced ? <Tag label="Replaced" tone="warning" /> : null}
+                  </View>
+                  <Text style={type.caption}>{relativeTime(item.created_at)}</Text>
                 </View>
-              </View>
-              <Text style={styles.content} numberOfLines={2}>
-                {item.content}
-              </Text>
-            </Pressable>
-          )}
+                <Text style={[styles.content, replaced && styles.contentReplaced]} numberOfLines={3}>
+                  {item.content}
+                </Text>
+              </Card>
+            );
+          }}
           ListEmptyComponent={
-            <Text style={styles.empty}>No memories yet.</Text>
+            filter === 'ALL' ? (
+              <EmptyState
+                emoji="🧠"
+                title="No memories yet"
+                body="When your Twin picks up something worth remembering in a chat, it asks you first. What you keep shows up here."
+                action={{
+                  title: 'Review suggestions',
+                  onPress: () => router.push('/(main)/candidates'),
+                }}
+              />
+            ) : (
+              <EmptyState
+                emoji={memoryType(filter).emoji}
+                title={`No ${memoryType(filter).plural.toLowerCase()} yet`}
+              />
+            )
           }
         />
       )}
@@ -149,80 +141,17 @@ export default function MemoriesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  // A ScrollView grows to fill its parent by default. With a short or empty
-  // list below it, the strip took half the screen and stretched every chip
-  // into a tall pill.
-  filterBar: { flexGrow: 0, flexShrink: 0 },
-  filters: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    backgroundColor: '#ffffff',
-  },
-  chipActive: {
-    backgroundColor: '#4338ca',
-    borderColor: '#4338ca',
-  },
-  chipText: { color: '#374151', fontSize: 13 },
-  chipTextActive: { color: '#ffffff', fontWeight: '600' },
-  row: {
-    backgroundColor: '#ffffff',
-    marginHorizontal: 12,
-    marginVertical: 4,
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
+  container: { flex: 1, backgroundColor: colors.bg },
   rowHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  badge: {
-    backgroundColor: '#eef2ff',
-    color: '#4338ca',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  ts: { color: '#6b7280', fontSize: 12 },
-  content: { color: '#111827', fontSize: 14, lineHeight: 20 },
-  empty: { textAlign: 'center', marginTop: 60, color: '#6b7280' },
-  headerBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    marginRight: 8,
-  },
-  headerBtnText: { color: '#4338ca', fontWeight: '600' },
-  rowSuperseded: {
-    backgroundColor: '#fffbeb',
-    borderColor: '#fcd34d',
-  },
-  rowHeaderRight: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: space.sm,
   },
-  supersededTag: {
-    backgroundColor: '#fef3c7',
-    color: '#92400e',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-    fontSize: 11,
-    fontWeight: '700',
-  },
+  tags: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', flex: 1 },
+  content: { ...type.body, color: colors.ink },
+  contentReplaced: { color: colors.muted },
+  replaced: { backgroundColor: colors.surfaceAlt },
+  headerBtn: { paddingHorizontal: space.md, paddingVertical: 6 },
+  headerBtnText: { color: colors.primary, fontWeight: '700', fontSize: 15 },
 });

@@ -7,12 +7,11 @@
  * a spinner that will never resolve.
  */
 
-import { Button, StyleSheet, Text, View } from 'react-native';
-
 import { apiFailureMessage } from '@/api/diagnostics';
 import { LoadingScreen } from '@/components/LoadingScreen';
 import { config } from '@/config';
 import { useSession } from '@/state/session';
+import { Centered, ErrorState } from '@/ui/kit';
 
 export default function Index() {
   const twinStatus = useSession((s) => s.twinStatus);
@@ -21,28 +20,16 @@ export default function Index() {
 
   if (twinStatus === 'failed') {
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Could not load your Twin</Text>
-        <Text style={styles.body}>
-          {apiFailureMessage(twinFailure, config.apiUrl)}
-        </Text>
-        {/* Back to 'idle' is all a retry needs: the gate re-runs the fetch. */}
-        <Button title="Try again" onPress={() => setTwinStatus('idle')} />
-      </View>
+      <Centered>
+        <ErrorState
+          title="Could not load your Twin"
+          message={apiFailureMessage(twinFailure, config.apiUrl)}
+          // Back to 'idle' is all a retry needs: the gate re-runs the fetch.
+          onRetry={() => setTwinStatus('idle')}
+        />
+      </Centered>
     );
   }
 
   return <LoadingScreen />;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    gap: 12,
-  },
-  title: { fontSize: 18, fontWeight: '700', textAlign: 'center' },
-  body: { fontSize: 14, color: '#4b5563', textAlign: 'center' },
-});

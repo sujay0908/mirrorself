@@ -1,39 +1,23 @@
 /**
- * Reflections screen (Sprint 7).
+ * Reflections: things your Twin noticed by looking across your memories,
+ * goals and recent chats.
  *
- * The Twin can read a bounded view of the user's own confirmed memories,
- * active goals and recent conversation turns and PROPOSE user-confirmable
- * observations. Four kinds — `profile_update`, `memory_dedup`,
- * `goal_update`, `insight`. The LLM proposes; the user confirms;
- * only confirmation can create durable changes.
+ * The Twin proposes; you decide; only your confirmation changes anything.
+ * Four kinds: a profile suggestion, two memories that say the same thing, a
+ * note for a goal, and an insight.
  *
- * UX contract (founder decisions):
- *   • INSIGHT confirmation is acknowledgement only — no Memory is
- *     created, no profile mutation. That is why the Keep button on an
- *     insight is labelled "Acknowledge".
- *   • PROFILE_UPDATE must expose current and proposed values, source
- *     memories and rationale BEFORE the user confirms. The card renders
- *     a diff block so "Why does my Twin think this about me?" has an
- *     answer before the button is pressed.
+ * Product rules kept from the original screen:
+ *   • Confirming an INSIGHT is acknowledgement only — no memory is created
+ *     and the profile does not change — so its button says "Got it".
+ *   • A PROFILE suggestion shows the current and proposed values and the
+ *     reason BEFORE you confirm.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-
-import { Alert } from '@/ui/alert';
-import { userErrorMessage } from '@/lib/user-errors';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 
 import { api, APIError } from '@/api/client';
-import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
 import type {
   GoalUpdatePayload,
   InsightPayload,
@@ -42,95 +26,95 @@ import type {
   Reflection,
   ReflectionPayload,
 } from '@/api/types';
+import { GoalPreview, MemoryPreview } from '@/components/RefPreview';
+import {
+  formatProfileValue,
+  plural,
+  profileFieldLabel,
+  reflectionKind,
+  reflectionRunMessage,
+} from '@/lib/format';
+import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
+import { userErrorMessage } from '@/lib/user-errors';
+import { useSession } from '@/state/session';
+import { Alert } from '@/ui/alert';
+import {
+  Button,
+  ButtonRow,
+  Card,
+  EmptyState,
+  ErrorState,
+  listContent,
+  Loading,
+  Tag,
+} from '@/ui/kit';
+import { colors, radius, space, type } from '@/ui/theme';
 
-function renderValue(value: unknown): string {
-  if (value === null || value === undefined) return '(none)';
-  if (typeof value === 'string') return value || '(empty)';
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function KindBadge({ kind }: { kind: Reflection['kind'] }) {
-  const label =
-    kind === 'profile_update'
-      ? 'Profile'
-      : kind === 'memory_dedup'
-        ? 'Memory dedup'
-        : kind === 'goal_update'
-          ? 'Goal update'
-          : 'Insight';
-  return <Text style={styles.badge}>{label}</Text>;
-}
-
-function ProfileUpdateCard({ payload }: { payload: ProfileUpdatePayload }) {
+function Why({ text }: { text: string }) {
+  if (!text) return null;
   return (
-    <View style={styles.body}>
-      <Text style={styles.fieldLabel}>Field</Text>
-      <Text style={styles.fieldValue}>{payload.field}</Text>
-
-      <Text style={styles.fieldLabel}>Current value</Text>
-      <Text style={styles.diffCurrent}>{renderValue(payload.current_value)}</Text>
-
-      <Text style={styles.fieldLabel}>Proposed value</Text>
-      <Text style={styles.diffProposed}>{renderValue(payload.proposed_value)}</Text>
-
-      <Text style={styles.rationaleLabel}>Why</Text>
-      <Text style={styles.rationaleText}>{payload.rationale}</Text>
+    <View style={styles.why}>
+      <Text style={type.overline}>Why</Text>
+      <Text style={styles.whyText}>{text}</Text>
     </View>
   );
 }
 
-function MemoryDedupCard({ payload }: { payload: MemoryDedupPayload }) {
+function ProfileUpdateBody({ payload }: { payload: ProfileUpdatePayload }) {
   return (
     <View style={styles.body}>
-      <Text style={styles.explain}>
-        Your Twin thinks these two memories say the same thing. Confirming
-        will mark one as superseded by the other. The superseded memory is
-        kept — the memories screen still shows it, and you can un-supersede
-        it. New chats will use the canonical one.
-      </Text>
-      <Text style={styles.fieldLabel}>Superseded memory</Text>
-      <Text style={styles.monoId}>{payload.superseded_memory_id}</Text>
-      <Text style={styles.fieldLabel}>Canonical memory</Text>
-      <Text style={styles.monoId}>{payload.canonical_memory_id}</Text>
-
-      <Text style={styles.rationaleLabel}>Why</Text>
-      <Text style={styles.rationaleText}>{payload.rationale}</Text>
+      <Text style={type.bodyStrong}>Update “{profileFieldLabel(payload.field)}”</Text>
+      <View style={styles.diff}>
+        <View style={[styles.diffBox, styles.diffBefore]}>
+          <Text style={type.overline}>Now</Text>
+          <Text style={styles.diffText}>{formatProfileValue(payload.current_value)}</Text>
+        </View>
+        <View style={[styles.diffBox, styles.diffAfter]}>
+          <Text style={[type.overline, { color: colors.success }]}>Suggested</Text>
+          <Text style={styles.diffText}>{formatProfileValue(payload.proposed_value)}</Text>
+        </View>
+      </View>
+      <Why text={payload.rationale} />
     </View>
   );
 }
 
-function GoalUpdateCard({ payload }: { payload: GoalUpdatePayload }) {
+function MemoryDedupBody({ payload }: { payload: MemoryDedupPayload }) {
   return (
     <View style={styles.body}>
-      <Text style={styles.explain}>
-        Non-destructive: confirming records a note on this goal&apos;s
-        history. The goal&apos;s title, status and priority are not
-        touched.
-      </Text>
-      <Text style={styles.fieldLabel}>Goal</Text>
-      <Text style={styles.monoId}>{payload.goal_id}</Text>
-      <Text style={styles.fieldLabel}>Note to add</Text>
-      <Text style={styles.diffProposed}>{payload.note}</Text>
-      <Text style={styles.rationaleLabel}>Why</Text>
-      <Text style={styles.rationaleText}>{payload.rationale}</Text>
+      <Text style={type.bodyStrong}>These two memories seem to say the same thing.</Text>
+      <Text style={type.caption}>Keep using this one</Text>
+      <MemoryPreview id={payload.canonical_memory_id} />
+      <Text style={type.caption}>Set this one aside (you can restore it later)</Text>
+      <MemoryPreview id={payload.superseded_memory_id} />
+      <Why text={payload.rationale} />
     </View>
   );
 }
 
-function InsightCard({ payload }: { payload: InsightPayload }) {
+function GoalUpdateBody({ payload }: { payload: GoalUpdatePayload }) {
+  return (
+    <View style={styles.body}>
+      <Text style={type.bodyStrong}>Add a note to this goal</Text>
+      <GoalPreview id={payload.goal_id} />
+      <View style={[styles.diffBox, styles.diffAfter]}>
+        <Text style={styles.diffText}>{payload.note}</Text>
+      </View>
+      <Text style={type.caption}>The goal itself — title, status, priority — stays as it is.</Text>
+      <Why text={payload.rationale} />
+    </View>
+  );
+}
+
+function InsightBody({ payload }: { payload: InsightPayload }) {
   return (
     <View style={styles.body}>
       <Text style={styles.insightHeadline}>{payload.headline}</Text>
-      <Text style={styles.insightBody}>{payload.body}</Text>
-      <Text style={styles.rationaleLabel}>Why</Text>
-      <Text style={styles.rationaleText}>{payload.rationale}</Text>
-      <Text style={styles.insightNote}>
-        Acknowledging an insight saves it as a reflection record. It does
-        not create a memory or change your profile.
+      <Text style={type.body}>{payload.body}</Text>
+      <Why text={payload.rationale} />
+      <Text style={type.caption}>
+        Saying “Got it” just notes that you&apos;ve seen this. It doesn&apos;t change
+        what your Twin remembers.
       </Text>
     </View>
   );
@@ -139,62 +123,76 @@ function InsightCard({ payload }: { payload: InsightPayload }) {
 function PayloadBody({ payload }: { payload: ReflectionPayload }) {
   switch (payload.kind) {
     case 'profile_update':
-      return <ProfileUpdateCard payload={payload} />;
+      return <ProfileUpdateBody payload={payload} />;
     case 'memory_dedup':
-      return <MemoryDedupCard payload={payload} />;
+      return <MemoryDedupBody payload={payload} />;
     case 'goal_update':
-      return <GoalUpdateCard payload={payload} />;
+      return <GoalUpdateBody payload={payload} />;
     case 'insight':
-      return <InsightCard payload={payload} />;
+      return <InsightBody payload={payload} />;
   }
 }
 
-function SourceList({ item }: { item: Reflection }) {
-  if (!item.source_memory_ids.length && !item.source_goal_ids.length) {
-    return null;
-  }
+function Sources({ item }: { item: Reflection }) {
+  const [open, setOpen] = useState(false);
+  const total = item.source_memory_ids.length + item.source_goal_ids.length;
+  // Dedup and goal notes already show the items they are about.
+  if (!total || item.kind === 'memory_dedup') return null;
+  const label = [
+    item.source_memory_ids.length
+      ? plural(item.source_memory_ids.length, 'memory', 'memories')
+      : null,
+    item.source_goal_ids.length ? plural(item.source_goal_ids.length, 'goal') : null,
+  ]
+    .filter(Boolean)
+    .join(' and ');
   return (
     <View style={styles.sources}>
-      {item.source_memory_ids.length ? (
-        <>
-          <Text style={styles.sourcesLabel}>Source memories</Text>
-          {item.source_memory_ids.map((mid) => (
-            <Text key={mid} style={styles.sourceId}>
-              {mid}
-            </Text>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        hitSlop={6}
+      >
+        <Text style={styles.sourcesToggle}>
+          Based on {label} {open ? '▴' : '▾'}
+        </Text>
+      </Pressable>
+      {open ? (
+        <View style={styles.sourceList}>
+          {item.source_memory_ids.map((id) => (
+            <MemoryPreview key={id} id={id} />
           ))}
-        </>
-      ) : null}
-      {item.source_goal_ids.length ? (
-        <>
-          <Text style={styles.sourcesLabel}>Source goals</Text>
-          {item.source_goal_ids.map((gid) => (
-            <Text key={gid} style={styles.sourceId}>
-              {gid}
-            </Text>
+          {item.source_goal_ids.map((id) => (
+            <GoalPreview key={id} id={id} />
           ))}
-        </>
+        </View>
       ) : null}
     </View>
   );
 }
 
 export default function ReflectionsScreen() {
+  const twinName = useSession((s) => s.twin?.display_name ?? 'Your Twin');
   const [items, setItems] = useState<Reflection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [running, setRunning] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<{ id: string; action: 'confirm' | 'reject' } | null>(null);
 
   const load = useCallback(async () => {
-    const res = await api.listReflections('pending');
-    setItems(res.items);
+    try {
+      const res = await api.listReflections('pending');
+      setItems(res.items);
+      setError(null);
+    } catch (e) {
+      setError(userErrorMessage(e));
+    }
   }, []);
 
   useEffect(() => {
-    load()
-      .catch((e) => Alert.alert('Could not load reflections', userErrorMessage(e)))
-      .finally(() => setLoading(false));
+    load().finally(() => setLoading(false));
   }, [load]);
 
   useRefreshOnFocus(load);
@@ -208,288 +206,178 @@ export default function ReflectionsScreen() {
     }
   };
 
-  async function runReflection() {
+  const reflectNow = useCallback(async () => {
     setRunning(true);
     try {
       const out = await api.runReflections();
-      if (out.error) {
-        Alert.alert(
-          'Reflection run failed',
-          `The Twin could not propose anything new (${out.error}).`,
-        );
-      } else {
-        Alert.alert(
-          'Reflection run complete',
-          `Proposed ${out.candidates_proposed}, kept ${out.candidates_persisted}, deduplicated ${out.candidates_deduplicated}.`,
-        );
-      }
+      const msg = reflectionRunMessage(out);
       await load();
+      Alert.alert(msg.title, msg.body);
     } catch (e) {
-      Alert.alert(
-        'Reflection run failed',
-        userErrorMessage(e),
-      );
+      Alert.alert('Could not reflect right now', userErrorMessage(e));
     } finally {
       setRunning(false);
     }
-  }
+  }, [load]);
+
+  const remove = (id: string) => setItems((prev) => prev.filter((c) => c.id !== id));
 
   async function confirmOne(id: string) {
-    setBusyId(id);
+    setBusy({ id, action: 'confirm' });
     try {
       const out = await api.confirmReflection(id);
       if (!out.applied) {
         Alert.alert(
-          'Confirmed, but could not apply',
-          String(out.reflection.apply_error ?? 'Unknown error.'),
+          'Saved, but not applied',
+          'Your answer was recorded, but the change could not be made. The items it refers to may have changed since.',
         );
       }
-      setItems((prev) => prev.filter((c) => c.id !== id));
+      remove(id);
     } catch (e) {
       if (alreadyHandled(e)) {
-        setItems((prev) => prev.filter((c) => c.id !== id));
+        remove(id);
         return;
       }
-      Alert.alert(
-        'Could not confirm',
-        userErrorMessage(e),
-      );
+      Alert.alert('Could not confirm', userErrorMessage(e));
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   }
 
   async function rejectOne(id: string) {
-    setBusyId(id);
+    setBusy({ id, action: 'reject' });
     try {
       await api.rejectReflection(id);
-      setItems((prev) => prev.filter((c) => c.id !== id));
+      remove(id);
     } catch (e) {
       if (alreadyHandled(e)) {
-        setItems((prev) => prev.filter((c) => c.id !== id));
+        remove(id);
         return;
       }
-      Alert.alert(
-        'Could not reject',
-        userErrorMessage(e),
-      );
+      Alert.alert('Could not dismiss', userErrorMessage(e));
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   }
 
-  return (
-    <View style={styles.container}>
-      <Stack.Screen
-        options={{
-          title: 'Reflections',
-          headerRight: () => (
-            <Pressable
-              onPress={runReflection}
-              disabled={running}
-              style={styles.headerBtn}
-            >
-              <Text style={styles.headerBtnText}>
-                {running ? '…' : 'Run now'}
-              </Text>
-            </Pressable>
-          ),
-        }}
-      />
-      {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} />
-      ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(c) => c.id}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          renderItem={({ item }) => {
-            const confirmLabel =
-              item.kind === 'insight' ? 'Acknowledge' : 'Confirm';
-            return (
-              <View style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <KindBadge kind={item.kind} />
-                  <Text style={styles.conf}>
-                    conf {item.confidence.toFixed(2)} · imp{' '}
-                    {item.importance.toFixed(2)}
-                  </Text>
-                </View>
-                <PayloadBody payload={item.proposed_payload} />
-                <SourceList item={item} />
-                <View style={styles.actions}>
-                  <Pressable
-                    disabled={busyId === item.id}
-                    onPress={() => rejectOne(item.id)}
-                    style={[styles.btn, styles.btnReject]}
-                  >
-                    <Text style={styles.btnRejectText}>Reject</Text>
-                  </Pressable>
-                  <Pressable
-                    disabled={busyId === item.id}
-                    onPress={() => confirmOne(item.id)}
-                    style={[styles.btn, styles.btnConfirm]}
-                  >
-                    <Text style={styles.btnConfirmText}>
-                      {busyId === item.id ? '…' : confirmLabel}
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            );
+  const header = (
+    <Stack.Screen
+      options={{
+        headerRight: () => (
+          <Pressable
+            onPress={reflectNow}
+            disabled={running}
+            accessibilityRole="button"
+            hitSlop={8}
+            style={styles.headerBtn}
+          >
+            <Text style={[styles.headerBtnText, running && { color: colors.faint }]}>
+              {running ? 'Reflecting…' : 'Reflect now'}
+            </Text>
+          </Pressable>
+        ),
+      }}
+    />
+  );
+
+  if (loading) {
+    return (
+      <>
+        {header}
+        <Loading />
+      </>
+    );
+  }
+  if (error && items.length === 0) {
+    return (
+      <>
+        {header}
+        <ErrorState
+          title="Could not load reflections"
+          message={error}
+          onRetry={() => {
+            setLoading(true);
+            load().finally(() => setLoading(false));
           }}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>No pending reflections</Text>
-              <Text style={styles.emptyBody}>
-                Tap &quot;Run now&quot; after a few chats and your Twin
-                will propose observations here. Only you can confirm them.
-              </Text>
-            </View>
-          }
         />
-      )}
-    </View>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {header}
+      <FlatList
+        style={styles.list}
+        data={items}
+        keyExtractor={(c) => c.id}
+        contentContainerStyle={listContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListHeaderComponent={
+          items.length > 0 ? (
+            <Text style={styles.intro}>
+              {twinName} looked across your memories, goals and chats. Nothing changes
+              unless you confirm it.
+            </Text>
+          ) : null
+        }
+        renderItem={({ item }) => {
+          const k = reflectionKind(item.kind);
+          const isBusy = busy?.id === item.id;
+          return (
+            <Card style={styles.card}>
+              <Tag label={`${k.emoji} ${k.label}`} tone={k.tone} />
+              <PayloadBody payload={item.proposed_payload} />
+              <Sources item={item} />
+              <ButtonRow>
+                <Button
+                  title={item.kind === 'insight' ? 'Not really' : 'Dismiss'}
+                  variant="secondary"
+                  onPress={() => rejectOne(item.id)}
+                  loading={isBusy && busy?.action === 'reject'}
+                  disabled={isBusy}
+                />
+                <Button
+                  title={item.kind === 'insight' ? 'Got it' : 'Confirm'}
+                  onPress={() => confirmOne(item.id)}
+                  loading={isBusy && busy?.action === 'confirm'}
+                  disabled={isBusy}
+                />
+              </ButtonRow>
+            </Card>
+          );
+        }}
+        ListEmptyComponent={
+          <EmptyState
+            emoji="💡"
+            title="Nothing to reflect on yet"
+            body={`After a few chats, ask ${twinName} to reflect. It may suggest profile updates, tidy up duplicate memories, or share an insight — and only you can confirm them.`}
+            action={{ title: running ? 'Reflecting…' : 'Reflect now', onPress: reflectNow }}
+          />
+        }
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  card: {
-    backgroundColor: '#ffffff',
-    marginHorizontal: 12,
-    marginVertical: 6,
-    padding: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    gap: 12,
-  },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between' },
-  badge: {
-    backgroundColor: '#ecfeff',
-    color: '#155e75',
-    paddingHorizontal: 10,
-    paddingVertical: 2,
-    borderRadius: 8,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  conf: { color: '#6b7280', fontSize: 12 },
-  body: { gap: 6 },
-  fieldLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#4b5563',
-    marginTop: 4,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  fieldValue: { fontSize: 14, color: '#111827' },
-  diffCurrent: {
-    fontSize: 14,
-    color: '#111827',
-    backgroundColor: '#f3f4f6',
-    padding: 10,
-    borderRadius: 8,
-    fontFamily: 'Menlo',
-  },
-  diffProposed: {
-    fontSize: 14,
-    color: '#065f46',
-    backgroundColor: '#ecfdf5',
-    padding: 10,
-    borderRadius: 8,
-    fontFamily: 'Menlo',
-  },
-  monoId: {
-    fontSize: 12,
-    color: '#374151',
-    fontFamily: 'Menlo',
-    backgroundColor: '#f3f4f6',
-    padding: 8,
-    borderRadius: 8,
-  },
-  rationaleLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#4b5563',
-    marginTop: 6,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  rationaleText: {
-    fontSize: 13,
-    color: '#374151',
-    lineHeight: 18,
-    fontStyle: 'italic',
-  },
-  explain: {
-    fontSize: 12,
-    color: '#4b5563',
-    lineHeight: 17,
-    backgroundColor: '#f9fafb',
-    padding: 10,
-    borderRadius: 8,
-  },
-  insightHeadline: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  insightBody: { fontSize: 14, color: '#111827', lineHeight: 20 },
-  insightNote: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginTop: 6,
-    fontStyle: 'italic',
-  },
-  sources: {
-    gap: 4,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-  },
-  sourcesLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#4b5563',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginTop: 4,
-  },
-  sourceId: { fontSize: 11, color: '#6b7280', fontFamily: 'Menlo' },
-  actions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 8,
-    paddingTop: 4,
-  },
-  btn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  btnConfirm: { backgroundColor: '#4f46e5' },
-  btnConfirmText: { color: '#ffffff', fontWeight: '700' },
-  btnReject: {
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-  },
-  btnRejectText: { color: '#374151', fontWeight: '600' },
-  empty: { alignItems: 'center', marginTop: 60, padding: 24 },
-  emptyTitle: { fontSize: 18, fontWeight: '700', marginBottom: 6 },
-  emptyBody: {
-    textAlign: 'center',
-    color: '#6b7280',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  headerBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    marginRight: 8,
-  },
-  headerBtnText: { color: '#4338ca', fontWeight: '600' },
+  list: { flex: 1, backgroundColor: colors.bg },
+  intro: { ...type.body, color: colors.muted, marginBottom: space.xs },
+  card: { gap: space.md },
+  body: { gap: space.sm },
+  diff: { gap: space.sm },
+  diffBox: { borderRadius: radius.md, padding: space.md, gap: 4 },
+  diffBefore: { backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
+  diffAfter: { backgroundColor: colors.successSoft },
+  diffText: { ...type.body, color: colors.ink },
+  why: { gap: 2 },
+  whyText: { ...type.body, color: colors.text, fontStyle: 'italic' },
+  insightHeadline: { ...type.title, fontSize: 18, lineHeight: 24 },
+  sources: { gap: space.sm },
+  sourcesToggle: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+  sourceList: { gap: 6 },
+  headerBtn: { paddingHorizontal: space.md, paddingVertical: 6 },
+  headerBtnText: { color: colors.primary, fontWeight: '700', fontSize: 15 },
 });
 
 function alreadyHandled(err: unknown): boolean {

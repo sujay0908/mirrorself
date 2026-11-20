@@ -1,44 +1,24 @@
 /**
- * Profile edit screen (Sprint 9).
+ * Edit profile: how your Twin talks to you, and the basics it should always
+ * know. Uses the existing PATCH /v1/twin — no new way to change the profile.
  *
- * The one mid-session surface for editing TwinProfile. Calls the
- * existing PATCH /v1/twin — Sprint 9 does NOT introduce a new
- * mutation path.
- *
- * UX contract:
- *   • style preset: the four shipped options (neutral / terse / warm
- *     / analytical).
- *   • style notes: free text up to 500 characters. The backend
- *     caps at 2000; the stricter mobile cap is a usability guard.
- *   • basic_profile: simple key/value editor. Until the backend
- *     tightens the shape we coerce every value to a string on save,
- *     so the server stores exactly what the user typed.
- *   • Explicit Save button. No autosave — the user authors the edit.
- *   • On success: refresh the session's Twin, show a one-line toast
- *     "The next reply will use your updated Twin profile.", nav back.
- *   • On failure: stay on screen, surface inline error, keep edits.
+ * Rules kept from the original screen:
+ *   • Four style presets (neutral / terse / warm / analytical).
+ *   • Style notes up to 500 characters (the server allows 2000; the shorter
+ *     limit keeps them useful).
+ *   • Basic facts are label/value pairs, saved as text exactly as typed.
+ *   • Nothing saves until you press Save. On success the session's Twin is
+ *     refreshed and you go back; on failure you stay with your edits intact.
  */
 
 import { useState } from 'react';
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-
-import { Alert } from '@/ui/alert';
-import { userErrorMessage } from '@/lib/user-errors';
-import { Stack, useRouter } from 'expo-router';
+import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
 import type { CommunicationStylePreset, TwinProfile } from '@/api/types';
 import { LoadingScreen } from '@/components/LoadingScreen';
+import { STYLES } from '@/lib/format';
 import { goBackOr } from '@/lib/navigation';
 import {
   basicProfileToRows,
@@ -47,14 +27,21 @@ import {
   type BasicProfileRow,
   validateProfileForm,
 } from '@/lib/profileForm';
+import { userErrorMessage } from '@/lib/user-errors';
 import { useSession } from '@/state/session';
-
-const STYLE_OPTIONS: Array<{ key: CommunicationStylePreset; label: string }> = [
-  { key: 'neutral', label: 'Neutral' },
-  { key: 'terse', label: 'Terse' },
-  { key: 'warm', label: 'Warm' },
-  { key: 'analytical', label: 'Analytical' },
-];
+import { Alert } from '@/ui/alert';
+import {
+  Button,
+  ButtonRow,
+  Card,
+  Notice,
+  OptionGrid,
+  Page,
+  SectionTitle,
+  TextField,
+  WEB_NO_OUTLINE,
+} from '@/ui/kit';
+import { colors, radius, space, type } from '@/ui/theme';
 
 export default function ProfileEditScreen() {
   const twin = useSession((s) => s.twin);
@@ -63,10 +50,10 @@ export default function ProfileEditScreen() {
   // overwrite the real profile with "neutral" and empty notes. The (main)
   // layout already waits for the Twin; this guard keeps that true here.
   if (!twin) return <LoadingScreen />;
-  return <ProfileForm key={twin.id} profile={twin.profile} />;
+  return <ProfileForm key={twin.id} name={twin.display_name} profile={twin.profile} />;
 }
 
-function ProfileForm({ profile }: { profile: TwinProfile }) {
+function ProfileForm({ name, profile }: { name: string; profile: TwinProfile }) {
   const router = useRouter();
   const setTwin = useSession((s) => s.setTwin);
 
@@ -89,9 +76,7 @@ function ProfileForm({ profile }: { profile: TwinProfile }) {
   }
 
   function updateRow(index: number, patch: Partial<BasicProfileRow>) {
-    setRows((prev) =>
-      prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
-    );
+    setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   }
 
   async function onSave() {
@@ -102,15 +87,11 @@ function ProfileForm({ profile }: { profile: TwinProfile }) {
       setError(validation.error);
       return;
     }
-    const payload = buildProfilePatch(state);
     setSaving(true);
     try {
-      const updated = await api.patchTwin(payload);
+      const updated = await api.patchTwin(buildProfilePatch(state));
       setTwin(updated);
-      Alert.alert(
-        'Profile updated',
-        'The next reply will use your updated Twin profile.',
-      );
+      Alert.alert('Saved', `${name} will use your updated profile from the next reply.`);
       goBackOr(router);
     } catch (e) {
       setError(userErrorMessage(e));
@@ -121,188 +102,99 @@ function ProfileForm({ profile }: { profile: TwinProfile }) {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <Stack.Screen options={{ title: 'Edit profile' }} />
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.sectionTitle}>Communication style</Text>
-        <View style={styles.chipRow}>
-          {STYLE_OPTIONS.map((opt) => (
-            <Pressable
-              key={opt.key}
-              onPress={() => setPreset(opt.key)}
-              style={[styles.chip, preset === opt.key && styles.chipActive]}
-            >
-              <Text
-                style={[
-                  styles.chipText,
-                  preset === opt.key && styles.chipTextActive,
-                ]}
-              >
-                {opt.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+      <Page>
+        <SectionTitle>How should {name} talk to you?</SectionTitle>
+        <OptionGrid options={STYLES} value={preset} onChange={setPreset} />
 
-        <Text style={styles.sectionTitle}>Style notes</Text>
-        <Text style={styles.hint}>
-          Optional notes your Twin keeps in mind when it replies.
-        </Text>
-        <TextInput
+        <SectionTitle>Anything else about how you like to talk?</SectionTitle>
+        <TextField
+          hint="Optional. Your Twin keeps this in mind in every reply."
           value={notes}
           onChangeText={setNotes}
           multiline
           maxLength={STYLE_NOTES_MAX}
-          style={styles.notesInput}
-          placeholder="e.g. Short replies in the morning."
+          counter={{ value: notes.length, max: STYLE_NOTES_MAX }}
+          placeholder="e.g. Keep mornings short. Ask before giving advice."
         />
-        <Text style={styles.counter}>
-          {notes.length} / {STYLE_NOTES_MAX}
-        </Text>
 
-        <Text style={styles.sectionTitle}>Basic profile</Text>
-        <Text style={styles.hint}>
-          Short facts your Twin should always know. Values are saved as text.
-        </Text>
-        {rows.map((row, idx) => (
-          <View key={idx} style={styles.kvRow}>
-            <TextInput
-              value={row.key}
-              onChangeText={(t) => updateRow(idx, { key: t })}
-              placeholder="key"
-              style={[styles.kvInput, styles.kvInputKey]}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <TextInput
-              value={row.value}
-              onChangeText={(t) => updateRow(idx, { value: t })}
-              placeholder="value"
-              style={[styles.kvInput, styles.kvInputValue]}
-            />
-            <Pressable
-              onPress={() => removeRow(idx)}
-              style={styles.kvRemoveBtn}
-            >
-              <Text style={styles.kvRemoveText}>✕</Text>
-            </Pressable>
-          </View>
-        ))}
-        <Pressable onPress={addRow} style={styles.addRow}>
-          <Text style={styles.addRowText}>+ Add row</Text>
-        </Pressable>
+        <SectionTitle>The basics</SectionTitle>
+        <Card>
+          <Text style={type.small}>
+            Short facts {name} should always know — where you live, what you do, who
+            matters to you.
+          </Text>
+          {rows.map((row, idx) => (
+            <View key={idx} style={styles.kvRow}>
+              <TextInput
+                value={row.key}
+                onChangeText={(t) => updateRow(idx, { key: t })}
+                placeholder="Label, e.g. City"
+                placeholderTextColor={colors.faint}
+                accessibilityLabel={`Label ${idx + 1}`}
+                style={[styles.kvInput, styles.kvKey, WEB_NO_OUTLINE]}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TextInput
+                value={row.value}
+                onChangeText={(t) => updateRow(idx, { value: t })}
+                placeholder="e.g. Bengaluru"
+                placeholderTextColor={colors.faint}
+                accessibilityLabel={`Value ${idx + 1}`}
+                style={[styles.kvInput, styles.kvValue, WEB_NO_OUTLINE]}
+              />
+              <Pressable
+                onPress={() => removeRow(idx)}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${row.key || 'this fact'}`}
+                hitSlop={6}
+                style={({ pressed }) => [styles.remove, pressed && styles.removePressed]}
+              >
+                <Text style={styles.removeText}>✕</Text>
+              </Pressable>
+            </View>
+          ))}
+          <Button title="＋ Add a fact" variant="ghost" size="sm" onPress={addRow} style={styles.add} />
+        </Card>
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <Notice tone="danger" body={error} /> : null}
 
-        <View style={styles.actions}>
-          <Pressable
-            onPress={() => goBackOr(router)}
-            style={[styles.btn, styles.btnSecondary]}
-          >
-            <Text style={styles.btnSecondaryText}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={onSave}
-            disabled={saving}
-            style={[styles.btn, styles.btnPrimary]}
-          >
-            {saving ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <Text style={styles.btnPrimaryText}>Save</Text>
-            )}
-          </Pressable>
-        </View>
-      </ScrollView>
+        <ButtonRow>
+          <Button title="Cancel" variant="secondary" onPress={() => goBackOr(router)} />
+          <Button title="Save changes" onPress={onSave} loading={saving} />
+        </ButtonRow>
+      </Page>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  content: { padding: 16, gap: 10 },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#111827',
-    marginTop: 16,
-  },
-  hint: { fontSize: 12, color: '#6b7280', lineHeight: 17 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    backgroundColor: '#ffffff',
-  },
-  chipActive: { backgroundColor: '#4338ca', borderColor: '#4338ca' },
-  chipText: { color: '#374151', fontSize: 13 },
-  chipTextActive: { color: '#ffffff', fontWeight: '600' },
-  notesInput: {
-    minHeight: 90,
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    padding: 12,
-    fontSize: 14,
-    color: '#111827',
-    textAlignVertical: 'top',
-  },
-  counter: {
-    fontSize: 11,
-    color: '#6b7280',
-    textAlign: 'right',
-    marginTop: -4,
-  },
-  kvRow: { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  flex: { flex: 1, backgroundColor: colors.bg },
+  kvRow: { flexDirection: 'row', gap: space.sm, alignItems: 'center' },
   kvInput: {
-    backgroundColor: '#ffffff',
-    borderRadius: 10,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 13,
-    color: '#111827',
-  },
-  kvInputKey: { flex: 1 },
-  kvInputValue: { flex: 2 },
-  kvRemoveBtn: { paddingHorizontal: 8, paddingVertical: 6 },
-  kvRemoveText: { color: '#b91c1c', fontSize: 16, fontWeight: '700' },
-  addRow: { marginTop: 4, paddingVertical: 8 },
-  addRowText: { color: '#4338ca', fontWeight: '600' },
-  error: {
-    color: '#b91c1c',
-    fontSize: 13,
-    marginTop: 8,
-    backgroundColor: '#fee2e2',
-    padding: 10,
-    borderRadius: 10,
-  },
-  actions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 8,
-    marginTop: 24,
-  },
-  btn: {
-    paddingHorizontal: 20,
+    borderColor: colors.border,
+    paddingHorizontal: space.md,
     paddingVertical: 10,
-    borderRadius: 10,
-    minWidth: 90,
+    fontSize: 15,
+    color: colors.ink,
+    minWidth: 0,
+  },
+  kvKey: { flex: 2 },
+  kvValue: { flex: 3 },
+  remove: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  btnPrimary: { backgroundColor: '#4338ca' },
-  btnPrimaryText: { color: '#ffffff', fontWeight: '700' },
-  btnSecondary: {
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-  },
-  btnSecondaryText: { color: '#374151', fontWeight: '600' },
+  removePressed: { backgroundColor: colors.dangerSoft },
+  removeText: { color: colors.danger, fontSize: 15, fontWeight: '700' },
+  add: { alignSelf: 'flex-start' },
 });

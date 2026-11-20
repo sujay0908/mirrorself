@@ -1,217 +1,169 @@
 /**
- * Message bubble, with Sprint 4 tap-to-reveal citations.
+ * One chat message.
  *
- * A twin bubble that was answered with the help of retrieved memories
- * shows a small "N memories used" affordance. Tapping it toggles a
- * citations panel below the bubble that links each memory id to its
- * detail screen (where provenance lives). Active goals that reached the
- * context are shown the same way under "N goals considered".
+ * Twin replies sit on the left beside the Twin's avatar; yours sit on the
+ * right in the brand colour. Under a reply, two optional, tappable notes:
+ * what the Twin drew on (memories and goals, shown by what they say) and what
+ * it learned since your last message.
  */
 
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
 
 import type { Message } from '@/api/types';
+import { GoalPreview, MemoryPreview } from '@/components/RefPreview';
 import { citationsFromMessage } from '@/lib/citations';
+import { friendlyEvent, plural } from '@/lib/format';
 import { learningFromMessage, learningHeadline } from '@/lib/learning';
+import { useSession } from '@/state/session';
+import { Avatar } from '@/ui/kit';
+import { colors, radius, space, type } from '@/ui/theme';
 
 interface Props {
   message: Message;
 }
 
 export function MessageBubble({ message }: Props) {
-  const router = useRouter();
-  const [expanded, setExpanded] = useState(false);
-  const [learningExpanded, setLearningExpanded] = useState(false);
-  const isUser = message.role === 'user';
-  const { memoryIds, goalIds, hasAny: hasCitations } =
-    citationsFromMessage(message);
+  const twinName = useSession((s) => s.twin?.display_name ?? 'Twin');
+  const [showSources, setShowSources] = useState(false);
+  const [showLearning, setShowLearning] = useState(false);
+
+  if (message.role === 'user') {
+    return (
+      <View style={styles.userRow}>
+        <View style={[styles.bubble, styles.userBubble]}>
+          <Text style={styles.userText} selectable>
+            {message.content}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  const { memoryIds, goalIds, hasAny: hasSources } = citationsFromMessage(message);
   const learning = learningFromMessage(message);
+  const sourceLabel = [
+    memoryIds.length ? plural(memoryIds.length, 'memory', 'memories') : null,
+    goalIds.length ? plural(goalIds.length, 'goal') : null,
+  ]
+    .filter(Boolean)
+    .join(' and ');
 
   return (
-    <View>
-      <View style={[styles.bubble, isUser ? styles.user : styles.twin]}>
-        <Text style={isUser ? styles.userText : styles.twinText}>
-          {message.content}
-        </Text>
+    <View style={styles.twinRow}>
+      <Avatar name={twinName} size={30} />
+      <View style={styles.twinColumn}>
+        <View style={[styles.bubble, styles.twinBubble]}>
+          <Text style={styles.twinText} selectable>
+            {message.content}
+          </Text>
+        </View>
+
+        {hasSources ? (
+          <Pressable
+            onPress={() => setShowSources((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showSources }}
+            style={({ pressed }) => [styles.note, pressed && styles.notePressed]}
+          >
+            <Text style={styles.noteText}>
+              🔎 Used {sourceLabel} {showSources ? '▴' : '▾'}
+            </Text>
+          </Pressable>
+        ) : null}
+        {hasSources && showSources ? (
+          <View style={styles.panel}>
+            {memoryIds.map((id) => (
+              <MemoryPreview key={id} id={id} />
+            ))}
+            {goalIds.map((id) => (
+              <GoalPreview key={id} id={id} />
+            ))}
+          </View>
+        ) : null}
+
+        {learning.hasAny ? (
+          <Pressable
+            onPress={() => setShowLearning((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showLearning }}
+            style={({ pressed }) => [styles.note, styles.learnNote, pressed && styles.notePressed]}
+          >
+            <Text style={[styles.noteText, styles.learnText]}>
+              ✨ {learningHeadline(learning)} {showLearning ? '▴' : '▾'}
+            </Text>
+          </Pressable>
+        ) : null}
+        {learning.hasAny && showLearning ? (
+          <View style={styles.panel}>
+            {learning.items.map((it) => {
+              const e = friendlyEvent(it.event_type, it.summary);
+              return (
+                <View key={it.id} style={styles.learnRow}>
+                  <Text style={styles.learnEmoji}>{e.emoji}</Text>
+                  <View style={styles.flex}>
+                    <Text style={type.caption}>{e.leadText}</Text>
+                    <Text style={styles.learnTitle}>{e.title}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
       </View>
-      {hasCitations ? (
-        <Pressable
-          onPress={() => setExpanded((v) => !v)}
-          style={styles.cites}
-        >
-          <Text style={styles.citesText}>
-            {memoryIds.length > 0
-              ? `${memoryIds.length} ${memoryIds.length === 1 ? 'memory' : 'memories'} used`
-              : null}
-            {memoryIds.length > 0 && goalIds.length > 0 ? ' · ' : ''}
-            {goalIds.length > 0
-              ? `${goalIds.length} ${goalIds.length === 1 ? 'goal' : 'goals'} considered`
-              : null}
-            {expanded ? ' ▴' : ' ▾'}
-          </Text>
-        </Pressable>
-      ) : null}
-      {hasCitations && expanded ? (
-        <View style={styles.panel}>
-          {memoryIds.map((mid) => (
-            <Pressable
-              key={mid}
-              onPress={() =>
-                router.push({
-                  pathname: '/(main)/memories/[id]',
-                  params: { id: mid },
-                })
-              }
-              style={styles.panelRow}
-            >
-              <Text style={styles.panelRowKind}>Memory</Text>
-              <Text style={styles.panelRowId}>{mid.slice(0, 8)}…</Text>
-            </Pressable>
-          ))}
-          {goalIds.map((gid) => (
-            <Pressable
-              key={gid}
-              onPress={() =>
-                router.push({
-                  pathname: '/(main)/goals/[id]',
-                  params: { id: gid },
-                })
-              }
-              style={styles.panelRow}
-            >
-              <Text style={styles.panelRowKind}>Goal</Text>
-              <Text style={styles.panelRowId}>{gid.slice(0, 8)}…</Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
-      {learning.hasAny ? (
-        <Pressable
-          onPress={() => setLearningExpanded((v) => !v)}
-          style={styles.learn}
-        >
-          <Text style={styles.learnText}>
-            ✦ {learningHeadline(learning)}
-            {learningExpanded ? ' ▴' : ' ▾'}
-          </Text>
-        </Pressable>
-      ) : null}
-      {learning.hasAny && learningExpanded ? (
-        <View style={styles.learnPanel}>
-          {learning.items.map((it) => (
-            <View key={it.id} style={styles.panelRow}>
-              <Text
-                style={[
-                  styles.learnLead,
-                  it.lead === 'acknowledged' ? styles.learnLeadAck : null,
-                ]}
-              >
-                {it.lead === 'acknowledged' ? 'Acknowledged' : 'Learned'}
-              </Text>
-              <Text style={styles.learnSummary}>{it.summary}</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bubble: {
-    padding: 12,
-    borderRadius: 16,
-    marginVertical: 4,
-    maxWidth: '85%',
-  },
-  user: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#4f46e5',
-  },
-  twin: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#e5e7eb',
-  },
-  userText: { color: '#ffffff' },
-  twinText: { color: '#111827' },
-  cites: {
-    alignSelf: 'flex-start',
-    marginTop: 2,
-    marginBottom: 2,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  citesText: {
-    fontSize: 11,
-    color: '#6b7280',
-    fontWeight: '600',
-  },
-  panel: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#f3f4f6',
-    borderRadius: 10,
-    padding: 8,
-    marginBottom: 6,
-    gap: 4,
-    maxWidth: '85%',
-  },
-  panelRow: {
+  flex: { flex: 1 },
+  userRow: { alignItems: 'flex-end', marginVertical: space.xs },
+  twinRow: {
     flexDirection: 'row',
-    gap: 8,
-    paddingVertical: 4,
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    gap: space.sm,
+    marginVertical: space.xs,
+    paddingRight: '10%',
   },
-  panelRowKind: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#4338ca',
-    backgroundColor: '#eef2ff',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    textTransform: 'uppercase',
-  },
-  panelRowId: { fontSize: 12, color: '#4338ca', fontWeight: '600' },
-  learn: {
-    alignSelf: 'flex-start',
-    marginTop: 2,
-    marginBottom: 2,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  learnText: {
-    fontSize: 11,
-    color: '#0e7490',
-    fontWeight: '700',
-  },
-  learnPanel: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#ecfeff',
-    borderRadius: 10,
-    padding: 8,
-    marginBottom: 6,
-    gap: 6,
+  twinColumn: { flexShrink: 1, gap: 6, alignItems: 'flex-start' },
+  bubble: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.lg },
+  userBubble: {
     maxWidth: '85%',
+    backgroundColor: colors.primary,
+    borderTopRightRadius: 6,
   },
-  learnLead: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#0e7490',
-    backgroundColor: '#cffafe',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    textTransform: 'uppercase',
+  twinBubble: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderTopLeftRadius: 6,
   },
-  learnLeadAck: {
-    color: '#92400e',
-    backgroundColor: '#fef3c7',
+  userText: { fontSize: 15, lineHeight: 22, color: colors.onPrimary },
+  twinText: { fontSize: 15, lineHeight: 22, color: colors.ink },
+  note: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  learnSummary: {
-    flex: 1,
-    fontSize: 12,
-    color: '#164e63',
+  notePressed: { backgroundColor: colors.primarySoft },
+  noteText: { fontSize: 12, fontWeight: '600', color: colors.muted },
+  learnNote: { backgroundColor: colors.tealSoft, borderColor: colors.tealBorder },
+  learnText: { color: colors.teal },
+  panel: { alignSelf: 'stretch', gap: 6, maxWidth: 480 },
+  learnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
+  learnEmoji: { fontSize: 18 },
+  learnTitle: { fontSize: 14, fontWeight: '600', color: colors.ink },
 });

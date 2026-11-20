@@ -1,96 +1,45 @@
 /**
- * Twin evolution screen (Sprint 8).
+ * Evolution: the history of changes you approved that actually took effect.
  *
- * Append-only history of durable, user-authorized changes that actually
- * took effect. Rejected reflections do NOT appear here. Pending
- * candidates do NOT appear here — those live in the Reflections screen
- * under the "Your Twin noticed…" framing.
- *
- * UX contract (founder decision #3):
- *
- * - `profile_confirmed` / `memory_learned` / `memory_consolidated` /
- *   `goal_updated` render as "Your Twin learned…" — these each
- *   represent an actual durable change the user authorized.
- * - `insight_acknowledged` renders as "You acknowledged…" — Sprint 7
- *   founder decision #1 pins that an insight confirmation is NOT
- *   identity mutation, so we don't phrase it as "learned".
+ * Rejected reflections and pending suggestions never appear here. Learned
+ * changes read "Your Twin learned…"; an acknowledged insight reads "You
+ * acknowledged…", because seeing an insight does not change who the Twin
+ * thinks you are.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-
-import { Alert } from '@/ui/alert';
-import { userErrorMessage } from '@/lib/user-errors';
-import { Stack } from 'expo-router';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
+import type { EvolutionEvent } from '@/api/types';
+import { friendlyEvent, relativeTime } from '@/lib/format';
 import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
-import type { EvolutionEvent, EvolutionEventType } from '@/api/types';
-
-function evolutionLead(event_type: EvolutionEventType): string {
-  if (event_type === 'insight_acknowledged') return 'You acknowledged';
-  return 'Your Twin learned';
-}
-
-function evolutionTitle(event: EvolutionEvent): string {
-  switch (event.event_type) {
-    case 'memory_learned':
-      return 'A new memory';
-    case 'memory_consolidated':
-      return 'Two memories merged';
-    case 'goal_updated':
-      return 'A goal note added';
-    case 'profile_confirmed':
-      return event.profile_field
-        ? `Profile · ${event.profile_field}`
-        : 'A profile change';
-    case 'insight_acknowledged':
-      return 'An insight';
-  }
-}
-
-function evolutionTone(event_type: EvolutionEventType): {
-  bg: string;
-  label: string;
-  labelColor: string;
-} {
-  if (event_type === 'insight_acknowledged') {
-    return { bg: '#fef3c7', label: 'Insight', labelColor: '#92400e' };
-  }
-  if (event_type === 'profile_confirmed') {
-    return { bg: '#dbeafe', label: 'Profile', labelColor: '#1e40af' };
-  }
-  if (event_type === 'memory_consolidated') {
-    return { bg: '#e0e7ff', label: 'Memory dedup', labelColor: '#3730a3' };
-  }
-  if (event_type === 'goal_updated') {
-    return { bg: '#dcfce7', label: 'Goal', labelColor: '#166534' };
-  }
-  return { bg: '#ecfeff', label: 'Memory', labelColor: '#155e75' };
-}
+import { userErrorMessage } from '@/lib/user-errors';
+import { useSession } from '@/state/session';
+import { EmptyState, ErrorState, listContent, Loading } from '@/ui/kit';
+import { colors, space, tones, type } from '@/ui/theme';
 
 export default function EvolutionScreen() {
+  const router = useRouter();
+  const twinName = useSession((s) => s.twin?.display_name ?? 'Your Twin');
   const [items, setItems] = useState<EvolutionEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await api.listEvolution(50);
-    setItems(res.items);
+    try {
+      const res = await api.listEvolution(50);
+      setItems(res.items);
+      setError(null);
+    } catch (e) {
+      setError(userErrorMessage(e));
+    }
   }, []);
 
   useEffect(() => {
-    load()
-      .catch((e) => Alert.alert('Could not load evolution', userErrorMessage(e)))
-      .finally(() => setLoading(false));
+    load().finally(() => setLoading(false));
   }, [load]);
 
   useRefreshOnFocus(load);
@@ -104,101 +53,103 @@ export default function EvolutionScreen() {
     }
   };
 
+  if (loading) return <Loading />;
+  if (error && items.length === 0) {
+    return (
+      <ErrorState
+        title="Could not load the history"
+        message={error}
+        onRetry={() => {
+          setLoading(true);
+          load().finally(() => setLoading(false));
+        }}
+      />
+    );
+  }
+
   return (
-    <View style={styles.container}>
-      <Stack.Screen options={{ title: 'What your Twin learned' }} />
-      {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} />
-      ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(e) => e.id}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          renderItem={({ item }) => {
-            const tone = evolutionTone(item.event_type);
-            return (
-              <View style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <Text
-                    style={[
-                      styles.badge,
-                      { backgroundColor: tone.bg, color: tone.labelColor },
-                    ]}
-                  >
-                    {tone.label}
-                  </Text>
-                  <Text style={styles.ts}>
-                    {new Date(item.created_at).toLocaleString()}
-                  </Text>
-                </View>
-                <Text style={styles.lead}>{evolutionLead(item.event_type)}</Text>
-                <Text style={styles.title}>{evolutionTitle(item)}</Text>
-                <Text style={styles.summary}>{item.summary}</Text>
+    <FlatList
+      style={styles.list}
+      data={items}
+      keyExtractor={(e) => e.id}
+      contentContainerStyle={[listContent, styles.content]}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      ListHeaderComponent={
+        items.length > 0 ? (
+          <Text style={styles.intro}>
+            Every change here is one you approved. Newest first.
+          </Text>
+        ) : null
+      }
+      renderItem={({ item, index }) => {
+        const e = friendlyEvent(item.event_type, item.summary, item.profile_field);
+        const t = tones[e.tone];
+        const target =
+          item.memory_id
+            ? () => router.push({ pathname: '/(main)/memories/[id]', params: { id: item.memory_id as string } })
+            : item.goal_id
+              ? () => router.push({ pathname: '/(main)/goals/[id]', params: { id: item.goal_id as string } })
+              : undefined;
+        return (
+          <View style={styles.row}>
+            <View style={styles.rail}>
+              <View style={[styles.dot, { backgroundColor: t.bg }]}>
+                <Text style={styles.dotEmoji}>{e.emoji}</Text>
               </View>
-            );
-          }}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>
-                Nothing to show here yet
-              </Text>
-              <Text style={styles.emptyBody}>
-                As you confirm memories and reflections, your Twin&apos;s
-                evolution history will show up here. Pending suggestions
-                live under Reflections — those don&apos;t count as
-                evolution until you confirm them.
-              </Text>
+              {index < items.length - 1 ? <View style={styles.line} /> : null}
             </View>
-          }
+            <Pressable
+              onPress={target}
+              disabled={!target}
+              accessibilityRole={target ? 'button' : undefined}
+              style={({ pressed }) => [styles.entry, pressed && target && styles.entryPressed]}
+            >
+              <Text style={[type.overline, { color: t.fg }]}>{e.leadText}</Text>
+              <Text style={styles.title}>{e.title}</Text>
+              <Text style={type.caption}>
+                {relativeTime(item.created_at)}
+                {target ? ' · view ›' : ''}
+              </Text>
+            </Pressable>
+          </View>
+        );
+      }}
+      ListEmptyComponent={
+        <EmptyState
+          emoji="🌱"
+          title="Nothing here yet"
+          body={`As you keep memories and confirm reflections, ${twinName}'s growth shows up here.`}
         />
-      )}
-    </View>
+      }
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  card: {
-    backgroundColor: '#ffffff',
-    marginHorizontal: 12,
-    marginVertical: 6,
-    padding: 14,
+  list: { flex: 1, backgroundColor: colors.bg },
+  content: { gap: 0 },
+  intro: { ...type.body, color: colors.muted, marginBottom: space.lg },
+  row: { flexDirection: 'row', gap: space.md },
+  rail: { alignItems: 'center', width: 40 },
+  dot: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dotEmoji: { fontSize: 18 },
+  line: { flex: 1, width: 2, backgroundColor: colors.border, marginVertical: 4 },
+  entry: {
+    flex: 1,
+    backgroundColor: colors.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    gap: 6,
+    borderColor: colors.border,
+    padding: space.md,
+    gap: 2,
+    marginBottom: space.md,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 2,
-    borderRadius: 8,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  ts: { color: '#6b7280', fontSize: 12 },
-  lead: {
-    fontSize: 12,
-    color: '#6b7280',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginTop: 4,
-    fontWeight: '600',
-  },
-  title: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  summary: { fontSize: 13, color: '#374151', lineHeight: 18 },
-  empty: { alignItems: 'center', marginTop: 60, padding: 24 },
-  emptyTitle: { fontSize: 18, fontWeight: '700', marginBottom: 6 },
-  emptyBody: {
-    textAlign: 'center',
-    color: '#6b7280',
-    fontSize: 14,
-    lineHeight: 20,
-  },
+  entryPressed: { backgroundColor: colors.surfaceAlt },
+  title: { ...type.heading },
 });

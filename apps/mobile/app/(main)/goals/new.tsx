@@ -1,30 +1,17 @@
 /**
- * New goal screen (Sprint 4, DF6).
- *
- * Minimal form: title (required), optional description, optional priority
- * (1..5, default 3). Target date is deferred to the detail-edit screen so
- * this flow stays frictionless on mobile.
+ * New goal: a title, an optional note, and how much it matters.
+ * Target dates are set later from the goal itself, to keep this quick.
  */
 
 import { useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-
-import { Alert } from '@/ui/alert';
-import { userErrorMessage } from '@/lib/user-errors';
-import { Stack, useRouter } from 'expo-router';
+import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
-
-const PRIORITIES = [1, 2, 3, 4, 5];
+import { PRIORITIES } from '@/lib/format';
+import { userErrorMessage } from '@/lib/user-errors';
+import { Button, Chip, Notice, Page, TextField } from '@/ui/kit';
+import { colors, space, type } from '@/ui/theme';
 
 export default function NewGoalScreen() {
   const router = useRouter();
@@ -32,13 +19,15 @@ export default function NewGoalScreen() {
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState(3);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function save() {
     const trimmed = title.trim();
     if (!trimmed) {
-      Alert.alert('A title is required.');
+      setError('Give your goal a title.');
       return;
     }
+    setError(null);
     setSaving(true);
     try {
       const goal = await api.createGoal({
@@ -46,15 +35,9 @@ export default function NewGoalScreen() {
         description: description.trim() || null,
         priority,
       });
-      router.replace({
-        pathname: '/(main)/goals/[id]',
-        params: { id: goal.id },
-      });
+      router.replace({ pathname: '/(main)/goals/[id]', params: { id: goal.id } });
     } catch (e) {
-      Alert.alert(
-        'Could not create goal',
-        userErrorMessage(e),
-      );
+      setError(userErrorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -62,105 +45,64 @@ export default function NewGoalScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <Stack.Screen options={{ title: 'New goal' }} />
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.label}>Title</Text>
-        <TextInput
+      <Page contentStyle={styles.content}>
+        <Text style={styles.lead}>
+          What are you working towards? Your Twin keeps active goals in mind when
+          you talk.
+        </Text>
+        <TextField
+          label="Goal"
           value={title}
           onChangeText={setTitle}
-          placeholder="Ship Sprint 4"
-          style={styles.input}
+          placeholder="e.g. Run a 10K by spring"
           maxLength={200}
+          autoFocus
         />
-
-        <Text style={styles.label}>Description (optional)</Text>
-        <TextInput
+        <TextField
+          label="Why it matters"
+          hint="Optional — how you'll know you're done, or what's driving it."
           value={description}
           onChangeText={setDescription}
-          placeholder="Why this matters, how you'll know you're done…"
-          style={[styles.input, styles.multiline]}
+          placeholder="I want to feel fitter and have something to train for."
           multiline
           maxLength={4000}
         />
-
-        <Text style={styles.label}>Priority (1 highest)</Text>
-        <View style={styles.priorityRow}>
-          {PRIORITIES.map((p) => (
-            <Pressable
-              key={p}
-              onPress={() => setPriority(p)}
-              style={[
-                styles.priorityChip,
-                priority === p && styles.priorityChipActive,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.priorityText,
-                  priority === p && styles.priorityTextActive,
-                ]}
-              >
-                {p}
-              </Text>
-            </Pressable>
-          ))}
+        <View style={styles.section}>
+          <Text style={styles.label}>Priority</Text>
+          <View style={styles.priorities}>
+            {PRIORITIES.map((p) => (
+              <Chip
+                key={p.value}
+                label={p.label}
+                selected={priority === p.value}
+                onPress={() => setPriority(p.value)}
+              />
+            ))}
+          </View>
         </View>
-
-        <Pressable
+        {error ? <Notice tone="danger" body={error} /> : null}
+        <Button
+          title="Create goal"
+          size="lg"
           onPress={save}
-          disabled={saving || !title.trim()}
-          style={[
-            styles.btn,
-            (!title.trim() || saving) && styles.btnDisabled,
-          ]}
-        >
-          <Text style={styles.btnText}>{saving ? '…' : 'Create goal'}</Text>
-        </Pressable>
-      </ScrollView>
+          loading={saving}
+          disabled={!title.trim()}
+          style={styles.submit}
+        />
+      </Page>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  content: { padding: 16, gap: 12 },
-  label: { fontSize: 13, color: '#374151', fontWeight: '600', marginTop: 8 },
-  input: {
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 16,
-  },
-  multiline: { minHeight: 100, textAlignVertical: 'top' },
-  priorityRow: { flexDirection: 'row', gap: 8 },
-  priorityChip: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  priorityChipActive: {
-    borderColor: '#4338ca',
-    backgroundColor: '#eef2ff',
-  },
-  priorityText: { color: '#374151', fontWeight: '700' },
-  priorityTextActive: { color: '#4338ca' },
-  btn: {
-    marginTop: 24,
-    backgroundColor: '#4f46e5',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  btnDisabled: { backgroundColor: '#9ca3af' },
-  btnText: { color: '#ffffff', fontWeight: '700', fontSize: 15 },
+  flex: { flex: 1, backgroundColor: colors.bg },
+  content: { gap: space.lg },
+  lead: { ...type.body, color: colors.muted },
+  section: { gap: space.sm },
+  label: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  priorities: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  submit: { marginTop: space.sm },
 });

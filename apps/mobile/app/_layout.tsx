@@ -12,6 +12,7 @@ import { logApiFailure } from '@/api/diagnostics';
 import { authGateAction } from '@/auth/route-guard';
 import { supabase } from '@/auth/supabase';
 import { useSession } from '@/state/session';
+import { colors } from '@/ui/theme';
 
 function useAuthGate() {
   const router = useRouter();
@@ -106,8 +107,8 @@ export default function RootLayout() {
   useAuthGate();
   return (
     <SafeAreaProvider>
-      <StatusBar style="auto" />
-      <Stack screenOptions={{ headerShown: false }} />
+      <StatusBar style="dark" />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
     </SafeAreaProvider>
   );
 }

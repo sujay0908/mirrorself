@@ -3,119 +3,96 @@
  */
 
 import { useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-
-import { Alert } from '@/ui/alert';
-import { userErrorMessage } from '@/lib/user-errors';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
 import type { CommunicationStylePreset } from '@/api/types';
+import { STYLES } from '@/lib/format';
+import { userErrorMessage } from '@/lib/user-errors';
 import { useSession } from '@/state/session';
-
-const styles_options: { key: CommunicationStylePreset; label: string }[] = [
-  { key: 'neutral', label: 'Neutral' },
-  { key: 'terse', label: 'Terse' },
-  { key: 'warm', label: 'Warm' },
-  { key: 'analytical', label: 'Analytical' },
-];
+import { Avatar, Button, Notice, OptionGrid, TextField } from '@/ui/kit';
+import { colors, space, type } from '@/ui/theme';
 
 export default function CreateTwinScreen() {
   const router = useRouter();
   const setTwin = useSession((s) => s.setTwin);
   const [name, setName] = useState('');
-  const [style, setStyle] = useState<CommunicationStylePreset>('neutral');
+  const [style, setStyle] = useState<CommunicationStylePreset>('warm');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function onSubmit() {
-    if (!name.trim()) {
-      Alert.alert('Please give your twin a name.');
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setError('Give your Twin a name.');
       return;
     }
+    setError(null);
     setLoading(true);
     try {
-      const twin = await api.createTwin({ name, communication_style: style });
+      const twin = await api.createTwin({ name: trimmed, communication_style: style });
       setTwin(twin);
       router.replace('/(main)/home');
     } catch (err) {
-      Alert.alert('Could not create twin', userErrorMessage(err));
+      setError(userErrorMessage(err));
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create your Twin</Text>
-      <Text style={styles.label}>Twin name</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Aurora, Nova, Ada …"
-        value={name}
-        onChangeText={setName}
-        editable={!loading}
-      />
-      <Text style={styles.label}>Communication style</Text>
-      <View style={styles.row}>
-        {styles_options.map((opt) => (
-          <Pressable
-            key={opt.key}
-            onPress={() => setStyle(opt.key)}
-            style={[styles.chip, style === opt.key && styles.chipActive]}
-          >
-            <Text
-              style={style === opt.key ? styles.chipActiveText : styles.chipText}
-            >
-              {opt.label}
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <View style={styles.column}>
+          <View style={styles.header}>
+            <Avatar name={name || 'Twin'} size={64} />
+            <Text style={type.display}>Meet your Twin</Text>
+            <Text style={styles.lead}>
+              Give it a name and choose how it should talk to you. You can change
+              both later.
             </Text>
-          </Pressable>
-        ))}
-      </View>
-      {loading ? (
-        <ActivityIndicator />
-      ) : (
-        <Pressable onPress={onSubmit} style={styles.button}>
-          <Text style={styles.buttonText}>Create Twin</Text>
-        </Pressable>
-      )}
-    </View>
+          </View>
+
+          <TextField
+            label="Name"
+            placeholder="e.g. Nova"
+            value={name}
+            onChangeText={setName}
+            editable={!loading}
+            maxLength={60}
+            onSubmitEditing={onSubmit}
+          />
+
+          <View style={styles.section}>
+            <Text style={styles.label}>How should it talk to you?</Text>
+            <OptionGrid options={STYLES} value={style} onChange={setStyle} />
+          </View>
+
+          {error ? <Notice tone="danger" body={error} /> : null}
+
+          <Button
+            title={name.trim() ? `Create ${name.trim()}` : 'Create my Twin'}
+            size="lg"
+            onPress={onSubmit}
+            loading={loading}
+            disabled={!name.trim()}
+          />
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, gap: 12, justifyContent: 'center' },
-  title: { fontSize: 24, fontWeight: '700' },
-  label: { fontSize: 14, fontWeight: '600', marginTop: 12 },
-  input: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    padding: 12,
-    borderRadius: 8,
-  },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-  },
-  chipActive: { backgroundColor: '#4f46e5', borderColor: '#4f46e5' },
-  chipText: { color: '#111827' },
-  chipActiveText: { color: '#ffffff' },
-  button: {
-    marginTop: 12,
-    backgroundColor: '#111827',
-    padding: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  buttonText: { color: '#ffffff', fontWeight: '600' },
+  flex: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flexGrow: 1, justifyContent: 'center', padding: space.xl },
+  column: { width: '100%', maxWidth: 520, alignSelf: 'center', gap: space.xl },
+  header: { alignItems: 'center', gap: space.sm },
+  lead: { ...type.body, color: colors.muted, textAlign: 'center', maxWidth: 380 },
+  section: { gap: space.sm },
+  label: { fontSize: 14, fontWeight: '700', color: colors.ink },
 });

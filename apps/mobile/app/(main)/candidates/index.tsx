@@ -1,48 +1,55 @@
 /**
- * Memory Candidates screen (Sprint 4, DF6).
+ * Review: what your Twin would like to remember, waiting for your yes or no.
  *
- * The highest-impact mobile surface: the user approves or rejects what the
- * Twin is proposing to remember. Only pending candidates are shown. Each
- * action is a POST that resolves the candidate server-side; on success the
- * row vanishes locally so the user keeps moving.
+ * Only pending suggestions are shown. Each answer is a POST that resolves the
+ * suggestion server-side; on success the card disappears so you keep moving.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-
-import { Alert } from '@/ui/alert';
-import { userErrorMessage } from '@/lib/user-errors';
-import { Stack, useRouter } from 'expo-router';
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { api, APIError } from '@/api/client';
-import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
-import { goBackOr } from '@/lib/navigation';
 import type { MemoryCandidate } from '@/api/types';
+import { confidenceLabel, importanceLabel, memoryType } from '@/lib/format';
+import { goBackOr } from '@/lib/navigation';
+import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
+import { userErrorMessage } from '@/lib/user-errors';
+import { useSession } from '@/state/session';
+import { Alert } from '@/ui/alert';
+import {
+  Button,
+  ButtonRow,
+  Card,
+  EmptyState,
+  ErrorState,
+  listContent,
+  Loading,
+  Tag,
+} from '@/ui/kit';
+import { colors, space, type } from '@/ui/theme';
 
 export default function CandidatesScreen() {
   const router = useRouter();
+  const twinName = useSession((s) => s.twin?.display_name ?? 'Your Twin');
   const [items, setItems] = useState<MemoryCandidate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<{ id: string; action: 'keep' | 'reject' } | null>(null);
 
   const load = useCallback(async () => {
-    const res = await api.listCandidates('pending');
-    setItems(res.items);
+    try {
+      const res = await api.listCandidates('pending');
+      setItems(res.items);
+      setError(null);
+    } catch (e) {
+      setError(userErrorMessage(e));
+    }
   }, []);
 
   useEffect(() => {
-    load()
-      .catch((e) => Alert.alert('Could not load candidates', userErrorMessage(e)))
-      .finally(() => setLoading(false));
+    load().finally(() => setLoading(false));
   }, [load]);
 
   useRefreshOnFocus(load);
@@ -56,156 +63,116 @@ export default function CandidatesScreen() {
     }
   };
 
-  async function confirmOne(id: string) {
-    setBusyId(id);
+  const remove = (id: string) => setItems((prev) => prev.filter((c) => c.id !== id));
+
+  async function keep(id: string) {
+    setBusy({ id, action: 'keep' });
     try {
       await api.confirmCandidate(id);
-      setItems((prev) => prev.filter((c) => c.id !== id));
+      remove(id);
     } catch (e) {
       if (alreadyHandled(e)) {
         // Done already (an earlier attempt that seemed to fail went
         // through). Nothing to tell the person; just clear it.
-        setItems((prev) => prev.filter((c) => c.id !== id));
+        remove(id);
         return;
       }
-      Alert.alert(
-        'Could not confirm',
-        userErrorMessage(e),
-      );
+      Alert.alert('Could not keep this', userErrorMessage(e));
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   }
 
-  async function rejectOne(id: string) {
-    setBusyId(id);
+  async function reject(id: string) {
+    setBusy({ id, action: 'reject' });
     try {
       await api.rejectCandidate(id);
-      setItems((prev) => prev.filter((c) => c.id !== id));
+      remove(id);
     } catch (e) {
       if (alreadyHandled(e)) {
-        setItems((prev) => prev.filter((c) => c.id !== id));
+        remove(id);
         return;
       }
-      Alert.alert(
-        'Could not reject',
-        userErrorMessage(e),
-      );
+      Alert.alert('Could not dismiss this', userErrorMessage(e));
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
+  }
+
+  if (loading) return <Loading />;
+  if (error && items.length === 0) {
+    return (
+      <ErrorState
+        title="Could not load suggestions"
+        message={error}
+        onRetry={() => {
+          setLoading(true);
+          load().finally(() => setLoading(false));
+        }}
+      />
+    );
   }
 
   return (
-    <View style={styles.container}>
-      <Stack.Screen options={{ title: 'Review memories' }} />
-      {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} />
-      ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(c) => c.id}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          renderItem={({ item }) => (
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.badge}>{item.type}</Text>
-                <Text style={styles.conf}>
-                  conf {item.confidence.toFixed(2)} · imp{' '}
-                  {item.importance.toFixed(2)}
-                </Text>
-              </View>
-              <Text style={styles.content}>{item.content}</Text>
-              <View style={styles.actions}>
-                <Pressable
-                  disabled={busyId === item.id}
-                  onPress={() => rejectOne(item.id)}
-                  style={[styles.btn, styles.btnReject]}
-                >
-                  <Text style={styles.btnRejectText}>Reject</Text>
-                </Pressable>
-                <Pressable
-                  disabled={busyId === item.id}
-                  onPress={() => confirmOne(item.id)}
-                  style={[styles.btn, styles.btnConfirm]}
-                >
-                  <Text style={styles.btnConfirmText}>
-                    {busyId === item.id ? '…' : 'Keep'}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>Nothing to review</Text>
-              <Text style={styles.emptyBody}>
-                As you chat, the Twin will propose memories here for you to
-                keep or reject.
-              </Text>
-              <Pressable
-                onPress={() => goBackOr(router)}
-                style={[styles.btn, styles.btnBack]}
-              >
-                <Text style={styles.btnConfirmText}>Back</Text>
-              </Pressable>
-            </View>
-          }
+    <FlatList
+      style={styles.list}
+      data={items}
+      keyExtractor={(c) => c.id}
+      contentContainerStyle={listContent}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      ListHeaderComponent={
+        items.length > 0 ? (
+          <Text style={styles.intro}>
+            {twinName} noticed these in your chats. Keep what&apos;s right — it only
+            remembers what you approve, and you can edit or delete it later.
+          </Text>
+        ) : null
+      }
+      renderItem={({ item }) => {
+        const t = memoryType(item.type);
+        const isBusy = busy?.id === item.id;
+        return (
+          <Card style={styles.card}>
+            <Tag label={`${t.emoji} ${t.label}`} tone={t.tone} />
+            <Text style={styles.content}>{item.content}</Text>
+            <Text style={type.caption}>
+              {confidenceLabel(item.confidence)} · {importanceLabel(item.importance)}
+            </Text>
+            <ButtonRow>
+              <Button
+                title="Not right"
+                variant="secondary"
+                onPress={() => reject(item.id)}
+                loading={isBusy && busy?.action === 'reject'}
+                disabled={isBusy}
+              />
+              <Button
+                title="✓  Keep"
+                onPress={() => keep(item.id)}
+                loading={isBusy && busy?.action === 'keep'}
+                disabled={isBusy}
+              />
+            </ButtonRow>
+          </Card>
+        );
+      }}
+      ListEmptyComponent={
+        <EmptyState
+          emoji="✅"
+          title="All caught up"
+          body={`When ${twinName} notices something worth remembering, it'll ask you here first.`}
+          action={{ title: 'Back', onPress: () => goBackOr(router) }}
         />
-      )}
-    </View>
+      }
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  card: {
-    backgroundColor: '#ffffff',
-    marginHorizontal: 12,
-    marginVertical: 6,
-    padding: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    gap: 10,
-  },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between' },
-  badge: {
-    backgroundColor: '#eef2ff',
-    color: '#4338ca',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  conf: { color: '#6b7280', fontSize: 12 },
-  content: { fontSize: 15, lineHeight: 20, color: '#111827' },
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
-  btn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  btnConfirm: { backgroundColor: '#4f46e5' },
-  btnConfirmText: { color: '#ffffff', fontWeight: '700' },
-  btnReject: {
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-  },
-  btnRejectText: { color: '#374151', fontWeight: '600' },
-  btnBack: { marginTop: 12, backgroundColor: '#4f46e5' },
-  empty: { alignItems: 'center', marginTop: 60, padding: 24 },
-  emptyTitle: { fontSize: 18, fontWeight: '700', marginBottom: 6 },
-  emptyBody: {
-    textAlign: 'center',
-    color: '#6b7280',
-    fontSize: 14,
-    lineHeight: 20,
-  },
+  list: { flex: 1, backgroundColor: colors.bg },
+  intro: { ...type.body, color: colors.muted, marginBottom: space.xs },
+  card: { gap: space.md },
+  content: { fontSize: 17, lineHeight: 24, color: colors.ink, fontWeight: '500' },
 });
 
 function alreadyHandled(err: unknown): boolean {
