@@ -32,6 +32,7 @@ import { userErrorMessage } from '@/lib/user-errors';
 import { Stack } from 'expo-router';
 
 import { api } from '@/api/client';
+import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
 import type { EvolutionEvent, EvolutionEventType } from '@/api/types';
 
 function evolutionLead(event_type: EvolutionEventType): string {
@@ -91,6 +92,8 @@ export default function EvolutionScreen() {
       .catch((e) => Alert.alert('Could not load evolution', userErrorMessage(e)))
       .finally(() => setLoading(false));
   }, [load]);
+
+  useRefreshOnFocus(load);
 
   const onRefresh = async () => {
     setRefreshing(true);

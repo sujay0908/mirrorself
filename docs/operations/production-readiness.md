@@ -77,6 +77,26 @@ https://mirrorself-web.vercel.app and https://www.timeismetime.com. It is
 - No rate limiting, request size limit, request ids, readiness check, or
   security headers.
 
+**Found in the end-to-end walkthrough (web app, 2026-11-20)**
+- Profile opened from a refresh or a link showed defaults ("Neutral", no
+  notes) because it rendered before the Twin loaded; Save then overwrote the
+  real profile. Screens under `(main)` now wait for the Twin.
+- Lists (Home, Goals, Memories, Review, Reflections, Evolution, Portrait)
+  never refreshed when you came back to them, so edits, deletions and new
+  chats looked lost until a page reload.
+- Back, Cancel and post-save navigation did nothing on a screen opened
+  directly (refresh or link); they now go Home when there is no history.
+- The 15 s client timeout was shorter than the API's ~45 s wake-up, so the
+  first screen after a quiet spell always failed, and slow saves that did
+  succeed were reported as failures. Now 60 s, and the loading screen says
+  the server is waking up.
+- Keeping or rejecting an item that an earlier, seemingly failed attempt had
+  already handled showed an error; it now just clears the item.
+- Screen titles showed raw route names (`goals/index`, `chat/[id]`).
+- The chat's "Say hello" text showed under the first message while it sent.
+- The Memories and Goals filter strips stretched into tall pills over a
+  short or empty list, and covered list items.
+
 ## What needs the owner
 
 | Action | Where | Why |
@@ -91,8 +111,10 @@ https://mirrorself-web.vercel.app and https://www.timeismetime.com. It is
 
 ## Not done, and why
 
-- **Authenticated browser walk-through after this deploy**: requires a
-  magic-link sign-in by the owner.
+- **Faster "Keep memory"**: confirming a memory makes many sequential
+  database round trips (15 s from a client far from the database, an
+  estimated ~4 s from Render). It works and shows progress; reducing the
+  round trips is a backend performance follow-up.
 - **Real model call**: no API key exists yet.
 - **Releasing the database connection during model calls**: the next
   scalability step (load-testing.md), deliberately not mixed into this

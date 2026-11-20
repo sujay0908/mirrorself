@@ -7,9 +7,10 @@
  * a spinner that will never resolve.
  */
 
-import { ActivityIndicator, Button, StyleSheet, Text, View } from 'react-native';
+import { Button, StyleSheet, Text, View } from 'react-native';
 
 import { apiFailureMessage } from '@/api/diagnostics';
+import { LoadingScreen } from '@/components/LoadingScreen';
 import { config } from '@/config';
 import { useSession } from '@/state/session';
 
@@ -31,11 +32,7 @@ export default function Index() {
     );
   }
 
-  return (
-    <View style={styles.container}>
-      <ActivityIndicator size="large" />
-    </View>
-  );
+  return <LoadingScreen />;
 }
 
 const styles = StyleSheet.create({

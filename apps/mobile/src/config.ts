@@ -69,8 +69,11 @@ const readPublicUrl = (key: PublicEnvKey, devFallback: string): string => {
 export const config = {
   apiUrl: readPublicUrl('EXPO_PUBLIC_API_URL', 'http://localhost:8000'),
   // Without a deadline a hung backend leaves every caller awaiting forever,
-  // which the UI can only render as an endless spinner.
-  apiTimeoutMs: readIntEnv('EXPO_PUBLIC_API_TIMEOUT_MS', 15_000),
+  // which the UI can only render as an endless spinner. It has to outlast the
+  // hosted API waking from idle (measured ~45 s on the free plan); at 15 s
+  // the first screen after a quiet spell always failed, and slow saves that
+  // did succeed were reported as failures.
+  apiTimeoutMs: readIntEnv('EXPO_PUBLIC_API_TIMEOUT_MS', 60_000),
   supabaseUrl: readEnv('EXPO_PUBLIC_SUPABASE_URL'),
   supabaseAnonKey: readEnv('EXPO_PUBLIC_SUPABASE_ANON_KEY'),
 } as const;

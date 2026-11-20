@@ -19,7 +19,7 @@
  *   • On failure: stay on screen, surface inline error, keep edits.
  */
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -37,7 +37,9 @@ import { userErrorMessage } from '@/lib/user-errors';
 import { Stack, useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
-import type { CommunicationStylePreset } from '@/api/types';
+import type { CommunicationStylePreset, TwinProfile } from '@/api/types';
+import { LoadingScreen } from '@/components/LoadingScreen';
+import { goBackOr } from '@/lib/navigation';
 import {
   basicProfileToRows,
   buildProfilePatch,
@@ -55,22 +57,26 @@ const STYLE_OPTIONS: Array<{ key: CommunicationStylePreset; label: string }> = [
 ];
 
 export default function ProfileEditScreen() {
-  const router = useRouter();
   const twin = useSession((s) => s.twin);
+  // The form must never start from defaults: Save sends every field, so a
+  // form opened before the Twin loaded (a refresh, or an opened link) used to
+  // overwrite the real profile with "neutral" and empty notes. The (main)
+  // layout already waits for the Twin; this guard keeps that true here.
+  if (!twin) return <LoadingScreen />;
+  return <ProfileForm key={twin.id} profile={twin.profile} />;
+}
+
+function ProfileForm({ profile }: { profile: TwinProfile }) {
+  const router = useRouter();
   const setTwin = useSession((s) => s.setTwin);
 
-  const initial = useMemo(() => {
-    const p = twin?.profile;
-    return {
-      preset: (p?.communication_style_preset ?? 'neutral') as CommunicationStylePreset,
-      notes: p?.communication_style_notes ?? '',
-      rows: basicProfileToRows(p?.basic_profile),
-    };
-  }, [twin]);
-
-  const [preset, setPreset] = useState<CommunicationStylePreset>(initial.preset);
-  const [notes, setNotes] = useState<string>(initial.notes);
-  const [rows, setRows] = useState<BasicProfileRow[]>(initial.rows);
+  const [preset, setPreset] = useState<CommunicationStylePreset>(
+    profile.communication_style_preset ?? 'neutral',
+  );
+  const [notes, setNotes] = useState<string>(profile.communication_style_notes ?? '');
+  const [rows, setRows] = useState<BasicProfileRow[]>(() =>
+    basicProfileToRows(profile.basic_profile),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -105,7 +111,7 @@ export default function ProfileEditScreen() {
         'Profile updated',
         'The next reply will use your updated Twin profile.',
       );
-      router.back();
+      goBackOr(router);
     } catch (e) {
       setError(userErrorMessage(e));
     } finally {
@@ -192,7 +198,7 @@ export default function ProfileEditScreen() {
 
         <View style={styles.actions}>
           <Pressable
-            onPress={() => router.back()}
+            onPress={() => goBackOr(router)}
             style={[styles.btn, styles.btnSecondary]}
           >
             <Text style={styles.btnSecondaryText}>Cancel</Text>

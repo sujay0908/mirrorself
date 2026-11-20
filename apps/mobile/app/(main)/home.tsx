@@ -26,6 +26,7 @@ import {
   conversationListReducer,
 } from '@/state/conversation-list';
 import { useSession } from '@/state/session';
+import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -67,6 +68,17 @@ export default function HomeScreen() {
   }, [loadAttempt]);
 
   const retry = useCallback(() => setLoadAttempt((n) => n + 1), []);
+
+  // Coming back from a chat or the profile: pick up new conversations, new
+  // titles and profile changes. Quietly: a failed background refresh keeps
+  // what is on screen rather than replacing it with an error.
+  const setTwin = useSession((s) => s.setTwin);
+  useRefreshOnFocus(() =>
+    Promise.allSettled([
+      api.listConversations().then((res) => dispatch({ type: 'loaded', items: res.items })),
+      api.getTwin().then(setTwin),
+    ]),
+  );
 
   const [signingOut, setSigningOut] = useState(false);
   const signOut = useCallback(() => {

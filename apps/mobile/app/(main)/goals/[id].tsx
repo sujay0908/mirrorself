@@ -22,6 +22,7 @@ import { userErrorMessage } from '@/lib/user-errors';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
+import { goBackOr } from '@/lib/navigation';
 import type { Goal, GoalStatus } from '@/api/types';
 
 const LEGAL_NEXT: Record<GoalStatus, GoalStatus[]> = {
@@ -226,7 +227,7 @@ export default function GoalDetailScreen() {
 
           <View style={styles.row}>
             <Pressable
-              onPress={() => router.back()}
+              onPress={() => goBackOr(router)}
               style={[styles.btn, styles.btnSecondary]}
             >
               <Text style={styles.btnSecondaryText}>Back</Text>

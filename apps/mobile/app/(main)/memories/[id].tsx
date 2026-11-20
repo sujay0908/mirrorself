@@ -22,6 +22,7 @@ import { userErrorMessage } from '@/lib/user-errors';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
+import { goBackOr } from '@/lib/navigation';
 import type { Memory, MemoryProvenance } from '@/api/types';
 
 export default function MemoryDetailScreen() {
@@ -83,7 +84,7 @@ export default function MemoryDetailScreen() {
           if (!id) return;
           try {
             await api.deleteMemory(id);
-            router.back();
+            goBackOr(router);
           } catch (e) {
             Alert.alert(
               'Could not delete',

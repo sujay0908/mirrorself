@@ -65,7 +65,7 @@ put a secret here.
 | `EXPO_PUBLIC_API_URL` | `https://mirrorself-api.onrender.com` (later `https://api.timeismetime.com`) |
 | `EXPO_PUBLIC_SUPABASE_URL` | `https://ihygwqrqkvkwlpzjrhdg.supabase.co` |
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | the project's **publishable** key (`sb_publishable_…`) |
-| `EXPO_PUBLIC_API_TIMEOUT_MS` | optional, default `15000` for reads (chat sends use 90 s) |
+| `EXPO_PUBLIC_API_TIMEOUT_MS` | optional, default `60000` for reads and writes (chat sends use 90 s). Must outlast the free API instance waking from idle (~45 s). |
 
 The build fails if any required value is missing or points at localhost
 (`scripts/check-web-env.js`, `scripts/verify-web-bundle.js`).

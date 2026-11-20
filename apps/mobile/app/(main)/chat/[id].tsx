@@ -163,10 +163,12 @@ export default function ChatScreen() {
           contentContainerStyle={styles.list}
           onContentSizeChange={scrollToEnd}
           ListEmptyComponent={
-            <Text style={styles.empty}>
-              Say hello. Your Twin learns from what you tell it, and you approve
-              anything it wants to remember.
-            </Text>
+            sending ? null : (
+              <Text style={styles.empty}>
+                Say hello. Your Twin learns from what you tell it, and you
+                approve anything it wants to remember.
+              </Text>
+            )
           }
           ListFooterComponent={
             sending ? (

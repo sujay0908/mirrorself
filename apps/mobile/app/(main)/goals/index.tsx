@@ -19,6 +19,7 @@ import {
 import { Stack, useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
+import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
 import type { Goal, GoalStatus } from '@/api/types';
 
 const STATUS_OPTIONS: Array<{ label: string; value: GoalStatus | 'ALL' }> = [
@@ -53,6 +54,9 @@ export default function GoalsScreen() {
     load(filter).finally(() => setLoading(false));
   }, [filter, load]);
 
+  // New goals, status changes and edits happen on screens above this one.
+  useRefreshOnFocus(() => load(filter));
+
   const onRefresh = async () => {
     setRefreshing(true);
     try {
@@ -68,6 +72,7 @@ export default function GoalsScreen() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        style={styles.filterBar}
         contentContainerStyle={styles.filters}
       >
         {STATUS_OPTIONS.map((opt) => (
@@ -160,11 +165,16 @@ export default function GoalsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
+  // A ScrollView grows to fill its parent by default. With a short or empty
+  // list below it, the strip took half the screen and stretched every chip
+  // into a tall pill.
+  filterBar: { flexGrow: 0, flexShrink: 0 },
   filters: {
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 8,
     flexDirection: 'row',
+    alignItems: 'center',
   },
   chip: {
     paddingHorizontal: 12,

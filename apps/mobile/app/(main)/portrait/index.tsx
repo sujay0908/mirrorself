@@ -28,6 +28,7 @@ import {
 import { Stack, useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
+import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
 import { userErrorMessage } from '@/lib/user-errors';
 import type {
   EvolutionLead,
@@ -83,6 +84,9 @@ export default function PortraitScreen() {
   useEffect(() => {
     load().finally(() => setLoading(false));
   }, [load]);
+
+  // The profile, memories and goals it summarises are edited elsewhere.
+  useRefreshOnFocus(load);
 
   const onRefresh = async () => {
     setRefreshing(true);

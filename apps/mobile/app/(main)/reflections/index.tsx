@@ -32,7 +32,8 @@ import { Alert } from '@/ui/alert';
 import { userErrorMessage } from '@/lib/user-errors';
 import { Stack } from 'expo-router';
 
-import { api } from '@/api/client';
+import { api, APIError } from '@/api/client';
+import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
 import type {
   GoalUpdatePayload,
   InsightPayload,
@@ -196,6 +197,8 @@ export default function ReflectionsScreen() {
       .finally(() => setLoading(false));
   }, [load]);
 
+  useRefreshOnFocus(load);
+
   const onRefresh = async () => {
     setRefreshing(true);
     try {
@@ -243,6 +246,10 @@ export default function ReflectionsScreen() {
       }
       setItems((prev) => prev.filter((c) => c.id !== id));
     } catch (e) {
+      if (alreadyHandled(e)) {
+        setItems((prev) => prev.filter((c) => c.id !== id));
+        return;
+      }
       Alert.alert(
         'Could not confirm',
         userErrorMessage(e),
@@ -258,6 +265,10 @@ export default function ReflectionsScreen() {
       await api.rejectReflection(id);
       setItems((prev) => prev.filter((c) => c.id !== id));
     } catch (e) {
+      if (alreadyHandled(e)) {
+        setItems((prev) => prev.filter((c) => c.id !== id));
+        return;
+      }
       Alert.alert(
         'Could not reject',
         userErrorMessage(e),
@@ -480,3 +491,7 @@ const styles = StyleSheet.create({
   },
   headerBtnText: { color: '#4338ca', fontWeight: '600' },
 });
+
+function alreadyHandled(err: unknown): boolean {
+  return err instanceof APIError && err.code === 'reflection_already_resolved';
+}

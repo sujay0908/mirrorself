@@ -20,6 +20,7 @@ import {
 import { Stack, useRouter } from 'expo-router';
 
 import { api } from '@/api/client';
+import { useRefreshOnFocus } from '@/lib/use-refresh-on-focus';
 import type { Memory, MemoryType } from '@/api/types';
 
 const TYPE_OPTIONS: Array<{ label: string; value: MemoryType | 'ALL' }> = [
@@ -46,6 +47,9 @@ export default function MemoriesScreen() {
     setLoading(true);
     load(filter).finally(() => setLoading(false));
   }, [filter, load]);
+
+  // Edits and deletions happen on the detail screen above this one.
+  useRefreshOnFocus(() => load(filter));
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -74,6 +78,7 @@ export default function MemoriesScreen() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        style={styles.filterBar}
         contentContainerStyle={styles.filters}
       >
         {TYPE_OPTIONS.map((opt) => (
@@ -145,11 +150,16 @@ export default function MemoriesScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
+  // A ScrollView grows to fill its parent by default. With a short or empty
+  // list below it, the strip took half the screen and stretched every chip
+  // into a tall pill.
+  filterBar: { flexGrow: 0, flexShrink: 0 },
   filters: {
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 8,
     flexDirection: 'row',
+    alignItems: 'center',
   },
   chip: {
     paddingHorizontal: 12,
